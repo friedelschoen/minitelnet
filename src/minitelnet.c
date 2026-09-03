@@ -194,6 +194,15 @@ void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const voi
 	telnet_send_escaped(telnet, data, size);
 }
 
+void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option) {
+	if (telnet->_send_sub_option != option)
+		/* already ended */
+		return;
+
+	telnet->_send_sub_option = -1;
+	telnet_send_command(telnet, TELNET_CMD_SE);
+}
+
 void telnet_send_command(struct telnet *telnet, enum telnet_command command) {
 	uint8_t out[2];
 

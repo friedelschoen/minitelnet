@@ -116,6 +116,9 @@ void telnet_send_data(struct telnet *telnet, const void *data, size_t size);
 /* send data to peer */
 void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const void *data, size_t size);
 
+/* explicit subneogotiation end */
+void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option);
+
 /* send short command */
 void telnet_send_command(struct telnet *telnet, enum telnet_command command);
 
