@@ -9,8 +9,8 @@ void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata
 	telnet->_handler = handler;
 	telnet->_userdata = userdata;
 	telnet->_state = TELNET_STATE_DATA;
-	telnet->_write_sub_option = -1;
-	telnet->sub_option = -1;
+	telnet->_send_sub_option = -1;
+	telnet->_recv_sub_option = -1;
 }
 
 static void telnet_emit(struct telnet *telnet, enum telnet_event_type type, union telnet_event *event) {
@@ -24,6 +24,20 @@ static void telnet_send_raw(struct telnet *telnet, const void *data, size_t size
 	ev.data.buffer = data;
 	ev.data.size = size;
 	telnet_emit(telnet, TELNET_EV_SEND, &ev);
+}
+
+static void telnet_write_raw(struct telnet *telnet, const void *data, size_t size) {
+	union telnet_event ev;
+	if (telnet->_recv_sub_option != -1) {
+		ev.subneg.option = telnet->_recv_sub_option;
+		ev.subneg.buffer = data;
+		ev.subneg.size = size;
+		telnet_emit(telnet, TELNET_EV_SUBNEG, &ev);
+	} else {
+		ev.data.buffer = data;
+		ev.data.size = size;
+		telnet_emit(telnet, TELNET_EV_DATA, &ev);
+	}
 }
 
 /* == NEGOTIATION LOGIC == */
@@ -158,8 +172,8 @@ void telnet_send_data(struct telnet *telnet, const void *data, size_t size) {
 	const uint8_t *buffer = data;
 	size_t start = 0;
 
-	if (telnet->_write_sub_option != -1) {
-		telnet->_write_sub_option = -1;
+	if (telnet->_send_sub_option != -1) {
+		telnet->_send_sub_option = -1;
 		telnet_send_command(telnet, TELNET_CMD_SE);
 	}
 
@@ -167,12 +181,12 @@ void telnet_send_data(struct telnet *telnet, const void *data, size_t size) {
 }
 
 void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const void *data, size_t size) {
-	if (telnet->_write_sub_option != option) {
-		if (telnet->_write_sub_option != -1)
+	if (telnet->_send_sub_option != option) {
+		if (telnet->_send_sub_option != -1)
 			/* if currently writing to a different subnegotiation, end that */
 			telnet_send_command(telnet, TELNET_CMD_SE);
 
-		telnet->_write_sub_option = option;
+		telnet->_send_sub_option = option;
 		telnet_send_command(telnet, TELNET_CMD_SB);
 		telnet_send_raw(telnet, &option, 1);
 	}
@@ -197,7 +211,6 @@ void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, u
 	out[0] = TELNET_IAC;
 	out[1] = command;
 	out[2] = option;
-
 	telnet_send_raw(telnet, out, sizeof(out));
 }
 
@@ -206,11 +219,11 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 	union telnet_event ev;
 	switch (cmd) {
 		case TELNET_CMD_SE:
-			if (telnet->sub_option == -1) {
+			if (telnet->_recv_sub_option == -1) {
 				ev.error = TELNET_ERROR_INVALID_SE;
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
-			telnet->sub_option = -1;
+			telnet->_recv_sub_option = -1;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 
@@ -229,7 +242,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			break;
 
 		case TELNET_CMD_SB:
-			if (telnet->sub_option != -1) {
+			if (telnet->_recv_sub_option != -1) {
 				ev.error = TELNET_ERROR_INVALID_SB;
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
@@ -245,9 +258,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			break;
 
 		case TELNET_IAC:
-			ev.data.buffer = &cmd; /* escape */
-			ev.data.size = 1;
-			telnet_emit(telnet, TELNET_EV_DATA, &ev);
+			telnet_write_raw(telnet, &cmd, 1);
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
@@ -295,7 +306,7 @@ static void telnet_feed_char(struct telnet *telnet, uint8_t chr) {
 			break;
 
 		case TELNET_STATE_SUBNEG_OPTION:
-			telnet->sub_option = chr;
+			telnet->_recv_sub_option = chr;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
@@ -303,7 +314,6 @@ static void telnet_feed_char(struct telnet *telnet, uint8_t chr) {
 
 void telnet_feed(struct telnet *telnet, const void *data, size_t size) {
 	const uint8_t *buffer = data;
-	union telnet_event ev;
 	size_t i = 0;
 
 	while (i < size) {
@@ -314,9 +324,7 @@ void telnet_feed(struct telnet *telnet, const void *data, size_t size) {
 				i++;
 
 			if (i > start) {
-				ev.data.buffer = buffer + start,
-				ev.data.size = i - start,
-				telnet_emit(telnet, TELNET_EV_DATA, &ev);
+				telnet_write_raw(telnet, buffer + start, i - start);
 			}
 
 			if (i < size) {

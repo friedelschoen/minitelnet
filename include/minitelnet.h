@@ -37,8 +37,8 @@ enum telnet_event_type {
 	TELNET_EV_SEND,     /* request to send data to peer */
 	TELNET_EV_NEG_THEM, /* an option is negotiated by them */
 	TELNET_EV_NEG_US,   /* an option is negotiated and acknogledged by them */
-	TELNET_EV_DATA,     /* data is sent, check telnet->sub_option whether it's
-	                       regular data or a subnegotation  */
+	TELNET_EV_SUBNEG,   /* subnegotiation data is sent */
+	TELNET_EV_DATA,     /* data is sent */
 	TELNET_EV_ERROR,    /* an error occurred :( */
 };
 
@@ -66,6 +66,12 @@ struct telnet_event_data {
 	size_t size;
 };
 
+struct telnet_event_subneg {
+	const void *buffer;
+	size_t size;
+	uint8_t option; /* option at last, so you could use .data */
+};
+
 struct telnet_event_negotiate {
 	enum telnet_command command;
 	uint8_t option;
@@ -74,6 +80,7 @@ struct telnet_event_negotiate {
 union telnet_event {
 	enum telnet_error error;
 	struct telnet_event_data data;
+	struct telnet_event_subneg subneg;
 	struct telnet_event_negotiate neg;
 	enum telnet_command command;
 };
@@ -84,11 +91,16 @@ struct telnet {
 	telnet_handler_t _handler;
 	void *_userdata;
 
+	/* current receiving state */
 	enum telnet_state _state;
-	enum telnet_command _command; /* is set in state OPTION */
-	int _write_sub_option;        /* non-zero if currently writing an subnegotiation */
+	/* if state == OPTION, _command is set to WILL/WONT/DO/DONT */
+	enum telnet_command _command;
+	/* if currently receiving a subnegotiation, this is set to its option; otherwise -1. */
+	int _recv_sub_option;
+	/* if currently sending a subnegotiation, this is set to its option; otherwise -1. */
+	int _send_sub_option;
 
-	int sub_option; /* is zero when in data */
+	/* here are the current option negotiations noted */
 	struct telnet_option options[256];
 };
 
