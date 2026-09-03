@@ -28,14 +28,16 @@ static void telnet_send_raw(struct telnet *telnet, const void *data, size_t size
 
 static void telnet_write_raw(struct telnet *telnet, const void *data, size_t size) {
 	union telnet_event ev;
+	ev.data.buffer = data;
+	ev.data.size = size;
+	ev.data.offset = telnet->_recv_offset;
+	telnet->_recv_offset += size;
+
 	if (telnet->_recv_sub_option != -1) {
 		ev.subneg.option = telnet->_recv_sub_option;
-		ev.subneg.buffer = data;
-		ev.subneg.size = size;
+		/* &ev->data == &ev->subneg */
 		telnet_emit(telnet, TELNET_EV_SUBNEG, &ev);
 	} else {
-		ev.data.buffer = data;
-		ev.data.size = size;
 		telnet_emit(telnet, TELNET_EV_DATA, &ev);
 	}
 }
@@ -233,6 +235,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
 			telnet->_recv_sub_option = -1;
+			telnet->_recv_offset = 0;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 
@@ -255,6 +258,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 				ev.error = TELNET_ERROR_INVALID_SB;
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
+			telnet->_recv_offset = 0;
 			telnet->_state = TELNET_STATE_SUBNEG_OPTION;
 			break;
 
@@ -316,6 +320,7 @@ static void telnet_feed_char(struct telnet *telnet, uint8_t chr) {
 
 		case TELNET_STATE_SUBNEG_OPTION:
 			telnet->_recv_sub_option = chr;
+			telnet->_recv_offset = 0;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}

@@ -64,11 +64,13 @@ struct telnet_option {
 struct telnet_event_data {
 	const void *buffer;
 	size_t size;
+	size_t offset;
 };
 
 struct telnet_event_subneg {
 	const void *buffer;
 	size_t size;
+	size_t offset;
 	uint8_t option; /* option at last, so you could use .data */
 };
 
@@ -97,6 +99,8 @@ struct telnet {
 	enum telnet_command _command;
 	/* if currently receiving a subnegotiation, this is set to its option; otherwise -1. */
 	int _recv_sub_option;
+	/* current offset in bytes since  */
+	size_t _recv_offset;
 	/* if currently sending a subnegotiation, this is set to its option; otherwise -1. */
 	int _send_sub_option;
 
