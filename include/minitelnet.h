@@ -62,13 +62,13 @@ struct telnet_option {
 };
 
 struct telnet_event_data {
-	const void *buffer;
+	const uint8_t *buffer;
 	size_t size;
 	size_t offset;
 };
 
 struct telnet_event_subneg {
-	const void *buffer;
+	const uint8_t *buffer;
 	size_t size;
 	size_t offset;
 	uint8_t option; /* option at last, so you could use .data */
@@ -109,16 +109,16 @@ struct telnet {
 };
 
 /* initalizes state */
-void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata);
+void telnet_init(struct telnet *telnet, telnet_handler_t handler, uint8_t *userdata);
 
 /* feed data into state machine with just received data */
-void telnet_feed(struct telnet *telnet, const void *data, size_t size);
+void telnet_feed(struct telnet *telnet, const uint8_t *data, size_t size);
 
 /* send data to peer */
-void telnet_send_data(struct telnet *telnet, const void *data, size_t size);
+void telnet_send_data(struct telnet *telnet, const uint8_t *data, size_t size);
 
 /* send data to peer */
-void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const void *data, size_t size);
+void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const uint8_t *data, size_t size);
 
 /* explicit subneogotiation end */
 void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option);
