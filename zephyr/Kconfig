@@ -1,0 +1,6 @@
+menuconfig MINITELNET
+	bool "minitelnet Telnet protocol library"
+	default n
+	help
+	  Minimal allocation-free Telnet protocol implementation.
+
