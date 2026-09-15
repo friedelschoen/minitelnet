@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stddef.h>
-#include <stdint.h>
 
 /** Telnet Interpret As Command (IAC) byte. */
 #define TELNET_IAC 0xff
@@ -28,7 +27,7 @@ enum telnet_command {
 	TELNET_CMD_WONT = 0xfc, /**< Sender refuses/disables an option. */
 	TELNET_CMD_DO = 0xfd,   /**< Sender requests/enables an option at the peer. */
 	TELNET_CMD_DONT = 0xfe, /**< Sender refuses/disables an option at the peer. */
-	TELNET_CMD_ESC = 0xff,  /**< Escaped IAC byte. */
+	TELNET_CMD_ESC = 0xff   /**< Escaped IAC byte. */
 };
 
 /**
@@ -115,7 +114,7 @@ enum telnet_event_type {
 	 *
 	 * The specific error is available as event->error.
 	 */
-	TELNET_EV_ERROR,
+	TELNET_EV_ERROR
 };
 
 /** Errors detected while parsing the Telnet stream. */
@@ -124,7 +123,7 @@ enum telnet_error {
 	TELNET_ERROR_INVALID_SB,
 
 	/** SE was encountered while no subnegotiation was active. */
-	TELNET_ERROR_INVALID_SE,
+	TELNET_ERROR_INVALID_SE
 };
 
 /**
@@ -146,18 +145,7 @@ enum telnet_option_state {
 	TELNET_OPTION_WANT_DISABLED,
 	TELNET_OPTION_WANT_ENABLED,
 	TELNET_OPTION_REQUEST_DISABLED,
-	TELNET_OPTION_REQUEST_ENABLED,
-};
-
-/**
- * Negotiation state for a Telnet option.
- *
- * `local` describes our side of the option and `peer` describes the peer's
- * side. Values are members of enum telnet_option_state.
- */
-struct telnet_option {
-	uint8_t local;
-	uint8_t peer;
+	TELNET_OPTION_REQUEST_ENABLED
 };
 
 /**
@@ -167,9 +155,9 @@ struct telnet_option {
  * be retained after the event handler returns.
  */
 struct telnet_event_data {
-	const uint8_t *buffer; /**< First byte of this chunk. */
-	size_t size;           /**< Number of bytes in this chunk. */
-	size_t offset;         /**< Stream-relative offset of the first byte. */
+	const unsigned char *buffer; /**< First byte of this chunk. */
+	size_t size;                 /**< Number of bytes in this chunk. */
+	size_t offset;               /**< Stream-relative offset of the first byte. */
 };
 
 /**
@@ -184,16 +172,16 @@ struct telnet_event_data {
  * event->data.
  */
 struct telnet_event_subneg {
-	const uint8_t *buffer; /**< Payload bytes in this chunk. */
-	size_t size;           /**< Number of payload bytes in this chunk. */
-	size_t offset;         /**< Offset within the current subnegotiation. */
-	uint8_t option;        /**< Option to which this subnegotiation belongs. */
+	const unsigned char *buffer; /**< Payload bytes in this chunk. */
+	size_t size;                 /**< Number of payload bytes in this chunk. */
+	size_t offset;               /**< Offset within the current subnegotiation. */
+	unsigned char option;        /**< Option to which this subnegotiation belongs. */
 };
 
 /** Information associated with a Telnet option negotiation event. */
 struct telnet_event_negotiate {
 	enum telnet_command command; /**< WILL, WONT, DO or DONT. */
-	uint8_t option;              /**< Telnet option number. */
+	unsigned char option;        /**< Telnet option number. */
 };
 
 /**
@@ -263,7 +251,7 @@ struct telnet {
 	int _send_sub_option;
 
 	/* Negotiation state for all 256 possible Telnet options. */
-	struct telnet_option options[256];
+	unsigned char _options[256];
 };
 
 /**
@@ -280,6 +268,19 @@ struct telnet {
 void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata);
 
 /**
+ * Reset a Telnet session.
+ *
+ * Resets all protocol and option negotiation state to its initial state.
+ * The configured event handler and user data are preserved.
+ *
+ * This can be used to reuse a Telnet instance for a new connection without
+ * calling telnet_init() again.
+ *
+ * @param telnet Telnet instance.
+ */
+void telnet_reset(struct telnet *telnet);
+
+/**
  * Feed received transport data into the Telnet parser.
  *
  * @param telnet Telnet state.
@@ -289,7 +290,7 @@ void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata
  * Application data, negotiations, commands and subnegotiation chunks are
  * reported synchronously through the event handler.
  */
-void telnet_feed(struct telnet *telnet, const uint8_t *data, size_t size);
+void telnet_feed(struct telnet *telnet, const unsigned char *data, size_t size);
 
 /**
  * Send application data to the peer.
@@ -304,7 +305,7 @@ void telnet_feed(struct telnet *telnet, const uint8_t *data, size_t size);
  * If a subnegotiation was sent previously, this call will end the subnegotiation
  * and continue sending regular data.
  */
-void telnet_send_data(struct telnet *telnet, const uint8_t *data, size_t size);
+void telnet_send_data(struct telnet *telnet, const unsigned char *data, size_t size);
 
 /**
  * Send a chunk of subnegotiation payload.
@@ -325,8 +326,8 @@ void telnet_send_data(struct telnet *telnet, const uint8_t *data, size_t size);
  * Any required IAC escaping is performed by the library. Encoded bytes are
  * emitted through TELNET_EV_SEND.
  */
-void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option,
-                                const uint8_t *data, size_t size);
+void telnet_send_subnegotiation(struct telnet *telnet, unsigned char option,
+                                const unsigned char *data, size_t size);
 
 /**
  * End an outgoing subnegotiation.
@@ -343,7 +344,7 @@ void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option,
  * The supplied option must match the currently active outgoing
  * subnegotiation.
  */
-void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option);
+void telnet_send_subnegotiation_end(struct telnet *telnet, unsigned char option);
 
 /**
  * Send a Telnet command.
@@ -376,4 +377,32 @@ void telnet_send_command(struct telnet *telnet,
  */
 void telnet_send_negotiate(struct telnet *telnet,
                            enum telnet_command command,
-                           uint8_t option);
+                           unsigned char option);
+
+/**
+ * Return the negotiation state of a local option.
+ *
+ * A local option is an option performed by this endpoint. Its state is
+ * negotiated by sending WILL/WONT or receiving DO/DONT.
+ *
+ * @param telnet Telnet instance.
+ * @param option Telnet option number.
+ *
+ * @return Current negotiation state of the local option.
+ */
+enum telnet_option_state
+telnet_option_local(const struct telnet *telnet, unsigned char option);
+
+/**
+ * Return the negotiation state of a peer option.
+ *
+ * A peer option is an option performed by the remote endpoint. Its state is
+ * negotiated by sending DO/DONT or receiving WILL/WONT.
+ *
+ * @param telnet Telnet instance.
+ * @param option Telnet option number.
+ *
+ * @return Current negotiation state of the peer option.
+ */
+enum telnet_option_state
+telnet_option_peer(const struct telnet *telnet, unsigned char option);

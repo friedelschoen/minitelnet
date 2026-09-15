@@ -3,10 +3,10 @@
 #include <string.h>
 
 enum telnet_state {
-	TELNET_STATE_DATA,          /* currently receiving data */
-	TELNET_STATE_COMMAND,       /* just received an IAC and expect a command */
-	TELNET_STATE_OPTION,        /* received an WILL/WONT/DO/DONT command; expecting an option */
-	TELNET_STATE_SUBNEG_OPTION, /* expecting subnegotiation option */
+	TELNET_STATE_DATA,         /* currently receiving data */
+	TELNET_STATE_COMMAND,      /* just received an IAC and expect a command */
+	TELNET_STATE_OPTION,       /* received an WILL/WONT/DO/DONT command; expecting an option */
+	TELNET_STATE_SUBNEG_OPTION /* expecting subnegotiation option */
 };
 
 
@@ -20,20 +20,27 @@ void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata
 	telnet->_recv_sub_option = -1;
 }
 
+void telnet_reset(struct telnet *telnet) {
+	telnet_handler_t handler = telnet->_handler;
+	void *userdata = telnet->_userdata;
+
+	telnet_init(telnet, handler, userdata);
+}
+
 static void telnet_emit(struct telnet *telnet, enum telnet_event_type type, union telnet_event *event) {
 	assert(telnet->_handler); /* using assert as handler must never be null */
 
 	telnet->_handler(telnet, type, event, telnet->_userdata);
 }
 
-static void telnet_send_raw(struct telnet *telnet, const uint8_t *data, size_t size) {
+static void telnet_send_raw(struct telnet *telnet, const unsigned char *data, size_t size) {
 	union telnet_event ev;
 	ev.data.buffer = data;
 	ev.data.size = size;
 	telnet_emit(telnet, TELNET_EV_SEND, &ev);
 }
 
-static void telnet_write_raw(struct telnet *telnet, const uint8_t *data, size_t size) {
+static void telnet_write_raw(struct telnet *telnet, const unsigned char *data, size_t size) {
 	union telnet_event ev;
 	ev.data.buffer = data;
 	ev.data.size = size;
@@ -50,6 +57,24 @@ static void telnet_write_raw(struct telnet *telnet, const uint8_t *data, size_t 
 }
 
 /* == NEGOTIATION LOGIC == */
+
+enum telnet_option_state telnet_option_local(const struct telnet *telnet, unsigned char option) {
+	return (enum telnet_option_state)(telnet->_options[option] & 0x0f);
+}
+
+enum telnet_option_state telnet_option_peer(const struct telnet *telnet, unsigned char option) {
+	return (enum telnet_option_state)((telnet->_options[option] & 0xf0) >> 4);
+}
+
+static void telnet_set_option_local(struct telnet *telnet, unsigned char option, enum telnet_option_state state) {
+	telnet->_options[option] &= 0xf0;
+	telnet->_options[option] |= (unsigned char) state;
+}
+
+static void telnet_set_option_peer(struct telnet *telnet, unsigned char option, enum telnet_option_state state) {
+	telnet->_options[option] &= 0x0f;
+	telnet->_options[option] |= (unsigned char) state << 4;
+}
 
 static enum telnet_option_state telnet_option_transition(enum telnet_option_state current,
                                                          int outgoing,
@@ -115,53 +140,39 @@ static enum telnet_option_state telnet_option_transition(enum telnet_option_stat
 	return current;
 }
 
-static uint8_t *telnet_option_state(struct telnet *telnet,
-                                    enum telnet_command command,
-                                    uint8_t option,
-                                    int outgoing) {
-	struct telnet_option *opt = &telnet->options[option];
+static enum telnet_option_state telnet_negotiate_transition(struct telnet *telnet,
+                                                            enum telnet_command command,
+                                                            unsigned char option,
+                                                            int outgoing) {
+	enum telnet_option_state new, old;
 
 	int will_side =
 	    command == TELNET_CMD_WILL ||
 	    command == TELNET_CMD_WONT;
 
-	/*
-	 * Outgoing:
-	 *   WILL/WONT -> us
-	 *   DO/DONT   -> them
-	 *
-	 * Incoming:
-	 *   WILL/WONT -> them
-	 *   DO/DONT   -> us
-	 */
-	if (outgoing)
-		return will_side ? &opt->local : &opt->peer;
-	else
-		return will_side ? &opt->peer : &opt->local;
-}
-
-static enum telnet_option_state telnet_negotiate_transition(struct telnet *telnet,
-                                                            enum telnet_command command,
-                                                            uint8_t option,
-                                                            int outgoing) {
-	uint8_t *state =
-	    telnet_option_state(telnet, command, option, outgoing);
-
 	int enable =
 	    command == TELNET_CMD_WILL ||
 	    command == TELNET_CMD_DO;
 
-	enum telnet_option_state old = *state;
+	if (outgoing)
+		old = will_side ? telnet_option_local(telnet, option) : telnet_option_peer(telnet, option);
+	else
+		old = will_side ? telnet_option_peer(telnet, option) : telnet_option_local(telnet, option);
 
-	*state = telnet_option_transition(old, outgoing, enable);
+	new = telnet_option_transition(old, outgoing, enable);
+
+	if (outgoing)
+		will_side ? telnet_set_option_local(telnet, option, new) : telnet_set_option_peer(telnet, option, new);
+	else
+		will_side ? telnet_set_option_peer(telnet, option, new) : telnet_set_option_local(telnet, option, new);
 
 	return old;
 }
 
-static void telnet_send_escaped(struct telnet *telnet, const uint8_t *data, size_t size) {
-	size_t start = 0;
+static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data, size_t size) {
+	size_t start = 0, i;
 
-	for (size_t i = 0; i < size; i++) {
+	for (i = 0; i < size; i++) {
 		if (data[i] != TELNET_IAC)
 			continue;
 
@@ -176,7 +187,7 @@ static void telnet_send_escaped(struct telnet *telnet, const uint8_t *data, size
 		telnet_send_raw(telnet, data + start, size - start);
 }
 
-void telnet_send_data(struct telnet *telnet, const uint8_t *data, size_t size) {
+void telnet_send_data(struct telnet *telnet, const unsigned char *data, size_t size) {
 	if (telnet->_send_sub_option != -1) {
 		telnet->_send_sub_option = -1;
 		telnet_send_command(telnet, TELNET_CMD_SE);
@@ -185,7 +196,7 @@ void telnet_send_data(struct telnet *telnet, const uint8_t *data, size_t size) {
 	telnet_send_escaped(telnet, data, size);
 }
 
-void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const uint8_t *data, size_t size) {
+void telnet_send_subnegotiation(struct telnet *telnet, unsigned char option, const unsigned char *data, size_t size) {
 	if (telnet->_send_sub_option != option) {
 		if (telnet->_send_sub_option != -1)
 			/* if currently writing to a different subnegotiation, end that */
@@ -199,7 +210,7 @@ void telnet_send_subnegotiation(struct telnet *telnet, uint8_t option, const uin
 	telnet_send_escaped(telnet, data, size);
 }
 
-void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option) {
+void telnet_send_subnegotiation_end(struct telnet *telnet, unsigned char option) {
 	if (telnet->_send_sub_option != option)
 		/* already ended */
 		return;
@@ -209,15 +220,15 @@ void telnet_send_subnegotiation_end(struct telnet *telnet, uint8_t option) {
 }
 
 void telnet_send_command(struct telnet *telnet, enum telnet_command command) {
-	uint8_t out[2];
+	unsigned char out[2];
 
 	out[0] = TELNET_IAC;
 	out[1] = command;
 	telnet_send_raw(telnet, out, 2);
 }
 
-void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, uint8_t option) {
-	uint8_t out[3];
+void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
+	unsigned char out[3];
 
 	telnet_negotiate_transition(
 	    telnet, command, option, 1);
@@ -274,14 +285,14 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			break;
 
 		case TELNET_IAC:
-			telnet_write_raw(telnet, (uint8_t *) &cmd, 1);
+			telnet_write_raw(telnet, (unsigned char *) &cmd, 1);
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
 }
 
 
-static void telnet_handle_negotiation(struct telnet *telnet, uint8_t option) {
+static void telnet_handle_negotiation(struct telnet *telnet, unsigned char option) {
 	union telnet_event ev;
 	enum telnet_command command = telnet->_command;
 
@@ -307,7 +318,7 @@ static void telnet_handle_negotiation(struct telnet *telnet, uint8_t option) {
 	telnet->_state = TELNET_STATE_DATA;
 }
 
-static void telnet_feed_char(struct telnet *telnet, uint8_t chr) {
+static void telnet_feed_char(struct telnet *telnet, unsigned char chr) {
 	switch (telnet->_state) {
 		case TELNET_STATE_DATA:
 			/* oops, that should not happen */
@@ -329,7 +340,7 @@ static void telnet_feed_char(struct telnet *telnet, uint8_t chr) {
 	}
 }
 
-void telnet_feed(struct telnet *telnet, const uint8_t *data, size_t size) {
+void telnet_feed(struct telnet *telnet, const unsigned char *data, size_t size) {
 	size_t i = 0;
 
 	while (i < size) {

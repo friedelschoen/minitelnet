@@ -15,6 +15,7 @@ target_include_directories(minitelnet
 )
 
 target_compile_options(minitelnet PRIVATE
+    -std=c89
     -Wall
     -Wextra
     -Wpedantic
