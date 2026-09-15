@@ -2,8 +2,15 @@
 #include <minitelnet.h>
 #include <string.h>
 
+enum telnet_state {
+	TELNET_STATE_DATA,          /* currently receiving data */
+	TELNET_STATE_COMMAND,       /* just received an IAC and expect a command */
+	TELNET_STATE_OPTION,        /* received an WILL/WONT/DO/DONT command; expecting an option */
+	TELNET_STATE_SUBNEG_OPTION, /* expecting subnegotiation option */
+};
 
-void telnet_init(struct telnet *telnet, telnet_handler_t handler, uint8_t *userdata) {
+
+void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata) {
 	memset(telnet, 0, sizeof(*telnet));
 
 	telnet->_handler = handler;
@@ -14,7 +21,7 @@ void telnet_init(struct telnet *telnet, telnet_handler_t handler, uint8_t *userd
 }
 
 static void telnet_emit(struct telnet *telnet, enum telnet_event_type type, union telnet_event *event) {
-	assert(telnet->_handler);
+	assert(telnet->_handler); /* using assert as handler must never be null */
 
 	telnet->_handler(telnet, type, event, telnet->_userdata);
 }
@@ -59,12 +66,12 @@ static enum telnet_option_state telnet_option_transition(enum telnet_option_stat
 				         ? TELNET_OPTION_ENABLED
 				         : TELNET_OPTION_WANT_DISABLED;
 
-			case TELNET_OPTION_THEY_WANT_ENABLED:
+			case TELNET_OPTION_REQUEST_ENABLED:
 				return enable
 				         ? TELNET_OPTION_ENABLED
 				         : TELNET_OPTION_DISABLED;
 
-			case TELNET_OPTION_THEY_WANT_DISABLED:
+			case TELNET_OPTION_REQUEST_DISABLED:
 				return enable
 				         ? TELNET_OPTION_ENABLED
 				         : TELNET_OPTION_DISABLED;
@@ -78,13 +85,13 @@ static enum telnet_option_state telnet_option_transition(enum telnet_option_stat
 		switch (current) {
 			case TELNET_OPTION_DISABLED:
 				return enable
-				         ? TELNET_OPTION_THEY_WANT_ENABLED
+				         ? TELNET_OPTION_REQUEST_ENABLED
 				         : TELNET_OPTION_DISABLED;
 
 			case TELNET_OPTION_ENABLED:
 				return enable
 				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_THEY_WANT_DISABLED;
+				         : TELNET_OPTION_REQUEST_DISABLED;
 
 			case TELNET_OPTION_WANT_ENABLED:
 				/* Response to our request to enable. */
@@ -98,8 +105,8 @@ static enum telnet_option_state telnet_option_transition(enum telnet_option_stat
 				         ? TELNET_OPTION_ENABLED
 				         : TELNET_OPTION_DISABLED;
 
-			case TELNET_OPTION_THEY_WANT_ENABLED:
-			case TELNET_OPTION_THEY_WANT_DISABLED:
+			case TELNET_OPTION_REQUEST_ENABLED:
+			case TELNET_OPTION_REQUEST_DISABLED:
 				/* Application hasn't answered the previous request yet. */
 				return current;
 		}
@@ -128,9 +135,9 @@ static uint8_t *telnet_option_state(struct telnet *telnet,
 	 *   DO/DONT   -> us
 	 */
 	if (outgoing)
-		return will_side ? &opt->us : &opt->them;
+		return will_side ? &opt->local : &opt->peer;
 	else
-		return will_side ? &opt->them : &opt->us;
+		return will_side ? &opt->peer : &opt->local;
 }
 
 static enum telnet_option_state telnet_negotiate_transition(struct telnet *telnet,
@@ -161,7 +168,7 @@ static void telnet_send_escaped(struct telnet *telnet, const uint8_t *data, size
 		if (i > start)
 			telnet_send_raw(telnet, data + start, i - start);
 
-		telnet_send_command(telnet, TELNET_IAC);
+		telnet_send_command(telnet, TELNET_CMD_ESC);
 		start = i + 1;
 	}
 
@@ -293,9 +300,9 @@ static void telnet_handle_negotiation(struct telnet *telnet, uint8_t option) {
 	 */
 	if (old == TELNET_OPTION_WANT_ENABLED ||
 	    old == TELNET_OPTION_WANT_DISABLED)
-		telnet_emit(telnet, TELNET_EV_NEG_US, &ev);
+		telnet_emit(telnet, TELNET_EV_NEG_RESPONSE, &ev);
 	else
-		telnet_emit(telnet, TELNET_EV_NEG_THEM, &ev);
+		telnet_emit(telnet, TELNET_EV_NEG_REQUEST, &ev);
 
 	telnet->_state = TELNET_STATE_DATA;
 }
