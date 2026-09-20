@@ -59,28 +59,24 @@ enum telnet_event_type {
 	TELNET_EV_SEND,
 
 	/**
-	 * The peer requests a change to one of our options.
+	 * An option state is updated.
 	 *
-	 * event->neg.option identifies the option and event->neg.command is
-	 * TELNET_CMD_DO or TELNET_CMD_DONT.
+	 * If an option is being negotiated it can skip through different state
+	 * as described in @ref telnet_option_state, most interesting ones to
+	 * handle are the following:
 	 *
-	 * Option policy is deliberately left to the application. The
-	 * application may answer using telnet_send_negotiate() with WILL or
-	 * WONT as appropriate.
+	 * TELNET_OPTION_YES and TELNET_OPTION_NO declare an option as definitly
+	 * enabled or disabled, other intermediate states should be considered
+	 * "disabled" for the time being.
+	 *
+	 * TELNET_OPTION_REQUEST_PENDING is a non-standard option state which indicates
+	 * an option is requested to be enabled and it is up to the application
+	 * to accept or reject this request. A request is accepted or rejected using
+	 * telnet_respond_negotiate(). It is not required to decide inside the
+	 * callback, but a fast response is appriciated as negotiations could timeout
+	 * or block the process.
 	 */
-	TELNET_EV_NEG_REQUEST,
-
-	/**
-	 * The peer responds to, or otherwise changes, its side of an option.
-	 *
-	 * event->neg.option identifies the option. event->neg.command contains
-	 * the received WILL, WONT, DO or DONT command as applicable to the
-	 * negotiation state.
-	 *
-	 * The library tracks negotiation state but does not assign semantics
-	 * to individual Telnet options.
-	 */
-	TELNET_EV_NEG_RESPONSE,
+	TELNET_EV_NEG,
 
 	/**
 	 * A chunk of subnegotiation payload was received.
@@ -103,7 +99,8 @@ enum telnet_event_type {
 	 * may be delivered in arbitrary-sized chunks.
 	 *
 	 * event->data.offset gives the byte offset in the current input stream
-	 * according to the library's offset semantics.
+	 * since the last mode switch. Summarizing, relaying on the offset as
+	 * a absolute offset pointer is not recommended.
 	 *
 	 * The buffer is only valid for the duration of the callback.
 	 */
@@ -120,32 +117,38 @@ enum telnet_event_type {
 /** Errors detected while parsing the Telnet stream. */
 enum telnet_error {
 	/** SB was encountered while a subnegotiation was already active. */
-	TELNET_ERROR_INVALID_SB,
+	TELNET_ERR_INVALID_SB,
 
 	/** SE was encountered while no subnegotiation was active. */
-	TELNET_ERROR_INVALID_SE
+	TELNET_ERR_INVALID_SE,
+
+	TELNET_ERR_NEGOTIATION,         /**< An invalid negotiation sequences is sent by peer. */
+	TELNET_ERR_ALREADY_NEGOTIATING, /**< telnet_send_negotiation() is called in middle of a ongoing negotiation */
 };
 
 /**
  * State of one direction of a Telnet option negotiation.
  *
- * The additional transitional states allow simultaneous and outstanding
- * negotiations to be represented without assigning option-specific policy
- * to the library.
+ * The YES/NO/WANTYES/WANTNO states are defined in RFC 1143 as the Q-method
+ * option negotiation. In this RFC the function and meaning for each state is
+ * described more detailed.
  *
- * WANT_* indicates a state change requested by the local endpoint and
- * awaiting a response from the peer.
- *
- * REQUEST_* indicates a state change requested by the peer and awaiting
- * a policy decision from the local application.
+ * TELNET_OPTION_REQUEST_PENDING is a minitelnet extension. RFC 1143 assumes
+ * that an unsolicited enable request is accepted or rejected when it is
+ * processed. Minitelnet instead allows the application to make that policy
+ * decision asynchronously through its event interface.
  */
 enum telnet_option_state {
-	TELNET_OPTION_DISABLED,
-	TELNET_OPTION_ENABLED,
-	TELNET_OPTION_WANT_DISABLED,
-	TELNET_OPTION_WANT_ENABLED,
-	TELNET_OPTION_REQUEST_DISABLED,
-	TELNET_OPTION_REQUEST_ENABLED
+	/* RFC 1143 states */
+	TELNET_OPTION_NO,               /**< Option is definitively disabled. (default) */
+	TELNET_OPTION_YES,              /**< Option is definitively enabled. */
+	TELNET_OPTION_WANTNO,           /**< Waiting for the option to become disabled. */
+	TELNET_OPTION_WANTYES,          /**< Waiting for the option to become enabled. */
+	TELNET_OPTION_WANTNO_OPPOSITE,  /**< Waiting for disable, but enable is now desired. */
+	TELNET_OPTION_WANTYES_OPPOSITE, /**< Waiting for enable, but disable is now desired. */
+
+	/* minitelnet extension */
+	TELNET_OPTION_REQUEST_PENDING /**< Peer requested enabling the option; awaiting application decision. See TELNET_EV_NEG. */
 };
 
 /**
@@ -178,10 +181,16 @@ struct telnet_event_subneg {
 	unsigned char option;        /**< Option to which this subnegotiation belongs. */
 };
 
-/** Information associated with a Telnet option negotiation event. */
+/**
+ * A change in option state.
+ *
+ * If this event is emitted, the state is already set to the new state.
+ */
 struct telnet_event_negotiate {
-	enum telnet_command command; /**< WILL, WONT, DO or DONT. */
-	unsigned char option;        /**< Telnet option number. */
+	unsigned char option;               /**< Telnet option number. */
+	int local;                          /**< If option changed on the local or peer side. */
+	enum telnet_option_state old_state; /**< State before change. */
+	enum telnet_option_state new_state; /**< State after change. */
 };
 
 /**
@@ -191,7 +200,7 @@ struct telnet_event_negotiate {
  *
  * - TELNET_EV_COMMAND: event.command
  * - TELNET_EV_SEND:    event.data
- * - TELNET_EV_NEG_*:   event.neg
+ * - TELNET_EV_NEG:     event.neg
  * - TELNET_EV_SUBNEG:  event.subneg or event.data
  * - TELNET_EV_DATA:    event.data
  * - TELNET_EV_ERROR:   event.error
@@ -214,8 +223,18 @@ struct telnet;
  * @param event    Event-specific payload. Only valid during this call.
  * @param userdata Opaque pointer supplied to telnet_init().
  *
- * The handler is invoked synchronously. For TELNET_EV_SEND, the application
- * should forward event->data.buffer to the underlying transport.
+ * The handler is invoked synchronously. Following events must be handled by
+ * the application:
+ *
+ * TELNET_EV_SEND must be handled for the libray to be able to send replies and
+ * send data.
+ *
+ * TELNET_EV_NEG with an condition on event->neg.new_state == TELNET_OPTION_REQUEST_PENDING.
+ * By default the application can just reject every option request (which is boring..), which
+ * is also the default behavious described in Telnet.
+ *
+ * TELNET_EV_DATA is not a hard dependency but usually a telnet connection is made
+ * to send data back and forth.
  */
 typedef void (*telnet_handler_t)(struct telnet *telnet,
                                  enum telnet_event_type type,
@@ -304,6 +323,10 @@ void telnet_feed(struct telnet *telnet, const unsigned char *data, size_t size);
  *
  * If a subnegotiation was sent previously, this call will end the subnegotiation
  * and continue sending regular data.
+ *
+ * Reminder that this library does not handle encoding states like Telnet BINARY aldus
+ * if this option is not yet negotiated, line-endings and encoding must be handled
+ * by the sender.
  */
 void telnet_send_data(struct telnet *telnet, const unsigned char *data, size_t size);
 
@@ -342,7 +365,7 @@ void telnet_send_subnegotiation(struct telnet *telnet, unsigned char option,
  * subnegotiations with the same option-code sequential.
  *
  * The supplied option must match the currently active outgoing
- * subnegotiation.
+ * subnegotiation otherwise it ignores the request.
  */
 void telnet_send_subnegotiation_end(struct telnet *telnet, unsigned char option);
 
@@ -373,11 +396,37 @@ void telnet_send_command(struct telnet *telnet,
  * not determine whether a particular option should be accepted. Option
  * policy belongs to the application.
  *
+ * If the application desires the peer end to enable an option, TELNET_CMD_DO
+ * must be sent, to disable an option send TELNET_CMD_DONT. To mark an
+ * option as enabled or disabled (or available/not available), TELNET_CMD_WILL
+ * and TELNET_CMD_WONT must be called.
+ *
  * Encoded negotiation bytes are emitted through TELNET_EV_SEND.
  */
-void telnet_send_negotiate(struct telnet *telnet,
-                           enum telnet_command command,
-                           unsigned char option);
+void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option);
+
+/**
+ * Respond to a pending Telnet option negotiation request.
+ *
+ * @param telnet  Telnet state.
+ * @param command One of TELNET_CMD_WILL, TELNET_CMD_WONT,
+ *                TELNET_CMD_DO or TELNET_CMD_DONT.
+ * @param option  Telnet option number.
+ *
+ * This function accepts or rejects an option enable request previously
+ * received from the peer and reported as TELNET_OPTION_REQUEST_PENDING
+ * through TELNET_EV_NEG.
+ *
+ * A received DO request is accepted with WILL and rejected with WONT.
+ * A received WILL request is accepted with DO and rejected with DONT.
+ *
+ * If there is no matching pending request, this function has no effect.
+ * In particular, it will never initiate a new negotiation. Use
+ * telnet_send_negotiate() to initiate an option state change.
+ *
+ * Encoded negotiation bytes are emitted through TELNET_EV_SEND.
+ */
+void telnet_respond_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option);
 
 /**
  * Return the negotiation state of a local option.

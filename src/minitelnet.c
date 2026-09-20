@@ -67,107 +67,376 @@ enum telnet_option_state telnet_option_peer(const struct telnet *telnet, unsigne
 }
 
 static void telnet_set_option_local(struct telnet *telnet, unsigned char option, enum telnet_option_state state) {
+	union telnet_event event;
+	unsigned char old = telnet->_options[option] & 0x0f;
+
+	if (old == state)
+		return;
+
 	telnet->_options[option] &= 0xf0;
 	telnet->_options[option] |= (unsigned char) state;
+
+	event.neg.option = option;
+	event.neg.local = 1;
+	event.neg.old_state = old;
+	event.neg.new_state = state;
+	telnet_emit(telnet, TELNET_EV_NEG, &event);
 }
 
 static void telnet_set_option_peer(struct telnet *telnet, unsigned char option, enum telnet_option_state state) {
+	union telnet_event event;
+	unsigned char old = telnet->_options[option] >> 4;
+
+	if (old == state)
+		return;
+
 	telnet->_options[option] &= 0x0f;
 	telnet->_options[option] |= (unsigned char) state << 4;
+
+	event.neg.option = option;
+	event.neg.local = 0;
+	event.neg.old_state = old;
+	event.neg.new_state = state;
+	telnet_emit(telnet, TELNET_EV_NEG, &event);
 }
 
-static enum telnet_option_state telnet_option_transition(enum telnet_option_state current,
-                                                         int outgoing,
-                                                         int enable) {
-	if (outgoing) {
-		switch (current) {
-			case TELNET_OPTION_DISABLED:
-				return enable
-				         ? TELNET_OPTION_WANT_ENABLED
-				         : TELNET_OPTION_DISABLED;
+static void telnet_send_negotiation_raw(struct telnet *telnet, enum telnet_command cmd, unsigned char option) {
+	unsigned char out[3];
+	out[0] = TELNET_IAC;
+	out[1] = cmd;
+	out[2] = option;
+	telnet_send_raw(telnet, out, sizeof(out));
+}
 
-			case TELNET_OPTION_ENABLED:
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_WANT_DISABLED;
+static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd, unsigned char option) {
+	union telnet_event event;
+	enum telnet_option_state local = telnet_option_local(telnet, option),
+	                         peer = telnet_option_peer(telnet, option);
 
-			case TELNET_OPTION_REQUEST_ENABLED:
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_DISABLED;
-
-			case TELNET_OPTION_REQUEST_DISABLED:
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_DISABLED;
-
-			case TELNET_OPTION_WANT_ENABLED:
-			case TELNET_OPTION_WANT_DISABLED:
-				/* We already have an outstanding negotiation. */
-				return current;
+	if (cmd == TELNET_CMD_WILL) {
+		/* == page 7 ==
+		Upon receipt of WILL, we choose based upon him and himq:
+		  NO            If we agree that he should enable, him=YES, send
+		                DO; otherwise, send DONT.
+		  YES           Ignore.
+		  WANTNO  EMPTY Error: DONT answered by WILL. him=NO.
+		       OPPOSITE Error: DONT answered by WILL. him=YES*,
+		                himq=EMPTY.
+		  WANTYES EMPTY him=YES.
+		       OPPOSITE him=WANTNO, himq=EMPTY, send DONT.
+		 */
+		switch (peer) {
+			case TELNET_OPTION_YES:
+				/* ignore */
+				break;
+			case TELNET_OPTION_NO:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_REQUEST_PENDING);
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_YES);
+				break;
+			case TELNET_OPTION_WANTNO:
+				event.error = TELNET_ERR_NEGOTIATION;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_DONT, option);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				event.error = TELNET_ERR_NEGOTIATION;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_YES);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				/* already requested */
+				break;
 		}
-	} else {
-		switch (current) {
-			case TELNET_OPTION_DISABLED:
-				return enable
-				         ? TELNET_OPTION_REQUEST_ENABLED
-				         : TELNET_OPTION_DISABLED;
-
-			case TELNET_OPTION_ENABLED:
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_REQUEST_DISABLED;
-
-			case TELNET_OPTION_WANT_ENABLED:
-				/* Response to our request to enable. */
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_DISABLED;
-
-			case TELNET_OPTION_WANT_DISABLED:
-				/* Response/conflict with our request to disable. */
-				return enable
-				         ? TELNET_OPTION_ENABLED
-				         : TELNET_OPTION_DISABLED;
-
-			case TELNET_OPTION_REQUEST_ENABLED:
-			case TELNET_OPTION_REQUEST_DISABLED:
-				/* Application hasn't answered the previous request yet. */
-				return current;
+	} else if (cmd == TELNET_CMD_WONT) {
+		/* == page 8 ==
+		Upon receipt of WONT, we choose based upon him and himq:
+		  NO            Ignore.
+		  YES           him=NO, send DONT.
+		  WANTNO  EMPTY him=NO.
+		       OPPOSITE him=WANTYES, himq=NONE, send DO.
+		  WANTYES EMPTY him=NO.*
+		       OPPOSITE him=NO, himq=NONE.**
+		 */
+		switch (peer) {
+			case TELNET_OPTION_YES:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_DONT, option);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_NO:
+				/* ignore */
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTNO:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_DO, option);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
+				break;
+		}
+	} else if (cmd == TELNET_CMD_DO) {
+		/* == page 7 ==
+		Upon receipt of DO, we choose based upon him and himq:
+		  NO            If we agree that he should enable, him=YES, send
+		                WILL; otherwise, send WONT.
+		  YES           Ignore.
+		  WANTNO  EMPTY Error: WONT answered by DO. him=NO.
+		       OPPOSITE Error: WONT answered by DO. him=YES*,
+		                himq=EMPTY.
+		  WANTYES EMPTY him=YES.
+		       OPPOSITE him=WANTNO, himq=EMPTY, send WONT.
+		 */
+		switch (local) {
+			case TELNET_OPTION_YES:
+				/* ignore */
+				break;
+			case TELNET_OPTION_NO:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_REQUEST_PENDING);
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_YES);
+				break;
+			case TELNET_OPTION_WANTNO:
+				event.error = TELNET_ERR_NEGOTIATION;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_WONT, option);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				event.error = TELNET_ERR_NEGOTIATION;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_YES);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				/* already requested */
+				break;
+		}
+	} else if (cmd == TELNET_CMD_DONT) {
+		/* == page 8 ==
+		Upon receipt of DONT, we choose based upon him and himq:
+		  NO            Ignore.
+		  YES           him=NO, send WONT.
+		  WANTNO  EMPTY him=NO.
+		       OPPOSITE him=WANTYES, himq=NONE, send WILL.
+		  WANTYES EMPTY him=NO.*
+		       OPPOSITE him=NO, himq=NONE.**
+		 */
+		switch (local) {
+			case TELNET_OPTION_YES:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_WONT, option);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_NO:
+				/* ignore */
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTNO:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_WILL, option);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
+				break;
 		}
 	}
-
-	return current;
 }
 
-static enum telnet_option_state telnet_negotiate_transition(struct telnet *telnet,
-                                                            enum telnet_command command,
-                                                            unsigned char option,
-                                                            int outgoing) {
-	enum telnet_option_state new, old;
+void telnet_respond_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
+	enum telnet_option_state local = telnet_option_local(telnet, option),
+	                         peer = telnet_option_peer(telnet, option);
 
-	int will_side =
-	    command == TELNET_CMD_WILL ||
-	    command == TELNET_CMD_WONT;
+	switch (command) {
+		case TELNET_CMD_WILL:
+		case TELNET_CMD_WONT:
+			if (local != TELNET_OPTION_REQUEST_PENDING)
+				return;
 
-	int enable =
-	    command == TELNET_CMD_WILL ||
-	    command == TELNET_CMD_DO;
+			telnet_send_negotiation_raw(telnet, command, option);
+			telnet_set_option_local(telnet, option, command == TELNET_CMD_WILL ? TELNET_OPTION_YES : TELNET_OPTION_NO);
+			break;
 
-	if (outgoing)
-		old = will_side ? telnet_option_local(telnet, option) : telnet_option_peer(telnet, option);
-	else
-		old = will_side ? telnet_option_peer(telnet, option) : telnet_option_local(telnet, option);
+		case TELNET_CMD_DO:
+		case TELNET_CMD_DONT:
+			if (peer != TELNET_OPTION_REQUEST_PENDING)
+				return;
 
-	new = telnet_option_transition(old, outgoing, enable);
-
-	if (outgoing)
-		will_side ? telnet_set_option_local(telnet, option, new) : telnet_set_option_peer(telnet, option, new);
-	else
-		will_side ? telnet_set_option_peer(telnet, option, new) : telnet_set_option_local(telnet, option, new);
-
-	return old;
+			telnet_send_negotiation_raw(telnet, command, option);
+			telnet_set_option_peer(telnet, option, command == TELNET_CMD_DO ? TELNET_OPTION_YES : TELNET_OPTION_NO);
+			break;
+		default:
+			return;
+	}
 }
+
+void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
+	union telnet_event event;
+	enum telnet_option_state local = telnet_option_local(telnet, option),
+	                         peer = telnet_option_peer(telnet, option);
+
+	if (command == TELNET_CMD_DO) {
+		/*
+		If we decide to ask him to enable:
+		  NO            him=WANTYES, send DO.
+		  YES           Error: Already enabled.
+		  WANTNO  EMPTY If we are queueing requests, himq=OPPOSITE;
+		                otherwise, Error: Cannot initiate new request
+		                in the middle of negotiation.
+		       OPPOSITE Error: Already queued an enable request.
+		  WANTYES EMPTY Error: Already negotiating for enable.
+		       OPPOSITE himq=EMPTY.
+		*/
+		switch (peer) {
+			case TELNET_OPTION_NO:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_DO, option);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_YES:
+				/* already enabled */
+				break;
+			case TELNET_OPTION_WANTNO:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTNO_OPPOSITE);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_WANTYES:
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				break;
+		}
+	} else if (command == TELNET_CMD_DONT) {
+		/*
+		If we decide to ask him to disable:
+		  NO            Error: Already disabled.
+		  YES           him=WANTNO, send DONT.
+		  WANTNO  EMPTY Error: Already negotiating for disable.
+		       OPPOSITE himq=EMPTY.
+		  WANTYES EMPTY If we are queueing requests, himq=OPPOSITE;
+		                otherwise, Error: Cannot initiate new request
+		                in the middle of negotiation.
+		       OPPOSITE Error: Already queued a disable request.
+		*/
+		switch (peer) {
+			case TELNET_OPTION_NO:
+				/* already disabled */
+				break;
+			case TELNET_OPTION_YES:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_DONT, option);
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTYES_OPPOSITE);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTNO:
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				break;
+		}
+	} else if (command == TELNET_CMD_WILL) {
+		/*
+		If we decide to ask him to enable:
+		  NO            him=WANTYES, send DO.
+		  YES           Error: Already enabled.
+		  WANTNO  EMPTY If we are queueing requests, himq=OPPOSITE;
+		                otherwise, Error: Cannot initiate new request
+		                in the middle of negotiation.
+		       OPPOSITE Error: Already queued an enable request.
+		  WANTYES EMPTY Error: Already negotiating for enable.
+		       OPPOSITE himq=EMPTY.
+		*/
+		switch (local) {
+			case TELNET_OPTION_NO:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_WILL, option);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_YES:
+				/* already enabled */
+				break;
+			case TELNET_OPTION_WANTNO:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTNO_OPPOSITE);
+				break;
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTYES);
+				break;
+			case TELNET_OPTION_WANTYES:
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				break;
+		}
+	} else if (command == TELNET_CMD_WONT) {
+		/*
+		If we decide to ask him to disable:
+		  NO            Error: Already disabled.
+		  YES           him=WANTNO, send DONT.
+		  WANTNO  EMPTY Error: Already negotiating for disable.
+		       OPPOSITE himq=EMPTY.
+		  WANTYES EMPTY If we are queueing requests, himq=OPPOSITE;
+		                otherwise, Error: Cannot initiate new request
+		                in the middle of negotiation.
+		       OPPOSITE Error: Already queued a disable request.
+		*/
+		switch (local) {
+			case TELNET_OPTION_NO:
+				/* already disabled */
+				break;
+			case TELNET_OPTION_YES:
+				telnet_send_negotiation_raw(telnet, TELNET_CMD_WONT, option);
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTYES:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTYES_OPPOSITE);
+				break;
+			case TELNET_OPTION_WANTNO_OPPOSITE:
+				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTNO);
+				break;
+			case TELNET_OPTION_WANTNO:
+			case TELNET_OPTION_WANTYES_OPPOSITE:
+				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
+				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				break;
+			case TELNET_OPTION_REQUEST_PENDING:
+				break;
+		}
+	}
+}
+
 
 static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data, size_t size) {
 	size_t start = 0, i;
@@ -227,25 +496,12 @@ void telnet_send_command(struct telnet *telnet, enum telnet_command command) {
 	telnet_send_raw(telnet, out, 2);
 }
 
-void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
-	unsigned char out[3];
-
-	telnet_negotiate_transition(
-	    telnet, command, option, 1);
-
-	out[0] = TELNET_IAC;
-	out[1] = command;
-	out[2] = option;
-	telnet_send_raw(telnet, out, sizeof(out));
-}
-
-
 static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd) {
 	union telnet_event ev;
 	switch (cmd) {
 		case TELNET_CMD_SE:
 			if (telnet->_recv_sub_option == -1) {
-				ev.error = TELNET_ERROR_INVALID_SE;
+				ev.error = TELNET_ERR_INVALID_SE;
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
 			telnet->_recv_sub_option = -1;
@@ -269,7 +525,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 
 		case TELNET_CMD_SB:
 			if (telnet->_recv_sub_option != -1) {
-				ev.error = TELNET_ERROR_INVALID_SB;
+				ev.error = TELNET_ERR_INVALID_SB;
 				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
 			}
 			telnet->_recv_offset = 0;
@@ -293,28 +549,7 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 
 
 static void telnet_handle_negotiation(struct telnet *telnet, unsigned char option) {
-	union telnet_event ev;
-	enum telnet_command command = telnet->_command;
-
-	enum telnet_option_state old =
-	    telnet_negotiate_transition(
-	        telnet, command, option, 0);
-
-	ev.neg.command = command;
-	ev.neg.option = option;
-
-	/*
-	 * WANT_* means this incoming negotiation is a response
-	 * to a negotiation we initiated.
-	 *
-	 * Otherwise it originated at the peer.
-	 */
-	if (old == TELNET_OPTION_WANT_ENABLED ||
-	    old == TELNET_OPTION_WANT_DISABLED)
-		telnet_emit(telnet, TELNET_EV_NEG_RESPONSE, &ev);
-	else
-		telnet_emit(telnet, TELNET_EV_NEG_REQUEST, &ev);
-
+	telnet_handle_rfc1143(telnet, telnet->_command, option);
 	telnet->_state = TELNET_STATE_DATA;
 }
 
