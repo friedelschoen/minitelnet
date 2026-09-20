@@ -122,8 +122,8 @@ enum telnet_error {
 	/** SE was encountered while no subnegotiation was active. */
 	TELNET_ERR_INVALID_SE,
 
-	TELNET_ERR_NEGOTIATION,         /**< An invalid negotiation sequences is sent by peer. */
-	TELNET_ERR_ALREADY_NEGOTIATING, /**< telnet_send_negotiation() is called in middle of a ongoing negotiation */
+	TELNET_ERR_NEGOTIATION,        /**< An invalid negotiation sequences is sent by peer. */
+	TELNET_ERR_ALREADY_NEGOTIATING /**< telnet_send_negotiation() is called in middle of a ongoing negotiation */
 };
 
 /**
