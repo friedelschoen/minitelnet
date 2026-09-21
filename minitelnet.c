@@ -269,7 +269,7 @@ static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd
 	}
 }
 
-void telnet_respond_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
+void telnet_respond_negotiation(struct telnet *telnet, enum telnet_command command, unsigned char option) {
 	enum telnet_option_state local = telnet_option_local(telnet, option),
 	                         peer = telnet_option_peer(telnet, option);
 
@@ -296,7 +296,7 @@ void telnet_respond_negotiate(struct telnet *telnet, enum telnet_command command
 	}
 }
 
-void telnet_send_negotiate(struct telnet *telnet, enum telnet_command command, unsigned char option) {
+void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command, unsigned char option) {
 	union telnet_event event;
 	enum telnet_option_state local = telnet_option_local(telnet, option),
 	                         peer = telnet_option_peer(telnet, option);
