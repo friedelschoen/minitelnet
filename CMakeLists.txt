@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 
 project(minitelnet LANGUAGES C)
 
-option(MINITELNET_WERROR "Treat minitelnet warnings as errors" OFF)
+include(CTest)
+
+option(MINITELNET_WERROR "Treat minitelnet warnings as errors" ON)
+option(MINITELNET_TEST_ON_BUILD "Run tests as part of the default build" ON)
 
 add_library(minitelnet
     minitelnet.c
@@ -26,3 +29,15 @@ endif()
 
 add_library(minitelnet::minitelnet ALIAS minitelnet)
 
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+
+    if(MINITELNET_TEST_ON_BUILD)
+        add_custom_target(check ALL
+            COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+            DEPENDS minitelnet_tests
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            USES_TERMINAL
+        )
+    endif()
+endif()
