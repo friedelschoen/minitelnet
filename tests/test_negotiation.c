@@ -289,7 +289,7 @@ START_TEST(test_send_negotiation_table) {
 		init_telnet(&telnet, &ctx);
 		set_state(&telnet, OPTION, tc->local, tc->initial);
 
-		telnet_send_negotiate(&telnet, tc->command, OPTION);
+		telnet_send_negotiation(&telnet, tc->command, OPTION);
 
 		actual = get_state(&telnet, OPTION, tc->local);
 
@@ -450,7 +450,7 @@ START_TEST(test_respond_negotiation) {
 		          tc->local,
 		          TELNET_OPTION_REQUEST_PENDING);
 
-		telnet_respond_negotiate(&telnet, tc->command, OPTION);
+		telnet_respond_negotiation(&telnet, tc->command, OPTION);
 
 		actual = get_state(&telnet, OPTION, tc->local);
 
@@ -497,8 +497,8 @@ END_TEST
 /*
  * A stale response must not start a new negotiation.
  *
- * This is the important distinction between telnet_respond_negotiate()
- * and telnet_send_negotiate().
+ * This is the important distinction between telnet_respond_negotiation()
+ * and telnet_send_negotiation().
  */
 START_TEST(test_stale_response_does_nothing) {
 	static const enum telnet_command commands[] = {
@@ -520,7 +520,7 @@ START_TEST(test_stale_response_does_nothing) {
 		local = commands[i] == TELNET_CMD_WILL ||
 		        commands[i] == TELNET_CMD_WONT;
 
-		telnet_respond_negotiate(&telnet, commands[i], OPTION);
+		telnet_respond_negotiation(&telnet, commands[i], OPTION);
 
 		ck_assert_int_eq(
 		    get_state(&telnet, OPTION, local),
@@ -568,7 +568,7 @@ START_TEST(test_withdrawn_request_makes_response_stale) {
 	ctx.output_size = 0;
 	ctx.error_count = 0;
 
-	telnet_respond_negotiate(&telnet, TELNET_CMD_DO, OPTION);
+	telnet_respond_negotiation(&telnet, TELNET_CMD_DO, OPTION);
 
 	ck_assert_int_eq(
 	    telnet_option_peer(&telnet, OPTION),

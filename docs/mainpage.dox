@@ -1,0 +1,259 @@
+/**
+ * @mainpage minitelnet
+ *
+ * @section introduction Introduction
+ *
+ * minitelnet is a small, allocation-free Telnet protocol engine for C. It
+ * handles the protocol mechanics needed to turn a byte stream into Telnet
+ * events and to encode outgoing Telnet data:
+ *
+ * - IAC parsing and escaping;
+ * - Telnet commands;
+ * - WILL/WONT/DO/DONT option negotiation;
+ * - RFC 1143 Q-method negotiation state;
+ * - streaming subnegotiation;
+ * - transport-independent input and output.
+ *
+ * The library deliberately does not implement the semantics of individual
+ * Telnet options and does not perform network I/O. An application decides
+ * which options it supports, interprets their subnegotiation payloads, and
+ * moves bytes between minitelnet and its transport.
+ *
+ * This makes the basic architecture:
+ *
+ * @code{.unparsed}
+ * transport -> telnet_feed() -> event handler -> application
+ *                                      |
+ *                                      +-> TELNET_EV_SEND -> transport
+ * @endcode
+ *
+ * A transport can be a TCP socket, TLS stream, UART, pipe, file, or anything
+ * else capable of carrying an ordered byte stream.
+ *
+ * @section getting_started Getting started
+ *
+ * A minitelnet session is represented by @ref telnet. Initialize it with
+ * @ref telnet_init and provide an event handler of type @ref telnet_handler_t.
+ * Received bytes are passed to @ref telnet_feed. The parser processes them
+ * immediately and reports results synchronously through the configured event
+ * handler.
+ *
+ * The most important event when integrating a transport is @ref TELNET_EV_SEND.
+ * Whenever this event is emitted, the application must write the supplied bytes
+ * to the peer. The library never writes to a socket or other transport itself.
+ * Events and their payloads are described by @ref telnet_event_type and
+ * @ref telnet_event.
+ *
+ * @section receiving Receiving data
+ *
+ * Pass data received from the peer directly to @ref telnet_feed. Input does
+ * not need to align with Telnet commands, negotiations, or subnegotiations.
+ * The parser keeps the required state between calls. An IAC byte may therefore
+ * be received in one call and its command byte in another.
+ *
+ * Ordinary application bytes are emitted as @ref TELNET_EV_DATA. Telnet
+ * framing and escaped IAC bytes have already been processed. Applications
+ * should not assume that one call to @ref telnet_feed produces one data event:
+ * payload may be emitted in arbitrary-sized chunks.
+ *
+ * Event buffers are borrowed and valid only for the duration of the callback.
+ * Copy data that must be retained after the handler returns. No data is buffered
+ * internally and the application must implementent buffering by itself if I/O-
+ * operations are expensive.
+ *
+ * @section sending Sending data
+ *
+ * Use @ref telnet_send_data for ordinary application bytes. The library
+ * performs Telnet-level escaping, including escaping literal IAC bytes, and
+ * reports encoded output through @ref TELNET_EV_SEND.
+ *
+ * Calling a send function does not itself perform I/O. A single operation may
+ * produce more than one @ref TELNET_EV_SEND event, so applications should
+ * treat these events as a stream rather than expect a one-to-one mapping
+ * between API calls and transport writes.
+ *
+ * Standalone Telnet commands can be generated with @ref telnet_send_command.
+ * Option negotiation and subnegotiation have dedicated interfaces described
+ * below.
+ *
+ * minitelnet only performs Telnet protocol framing. Application-level rules
+ * associated with negotiated options remain the responsibility of the caller.
+ *
+ * @section negotiation Option negotiation
+ *
+ * Telnet options are directional. An option may independently be enabled for
+ * the local endpoint and for the peer:
+ *
+ * - a local option is performed by this endpoint and is negotiated using
+ *   WILL/WONT locally and DO/DONT from the peer;
+ * - a peer option is performed by the remote endpoint and is negotiated using
+ *   DO/DONT locally and WILL/WONT from the peer.
+ *
+ * The current states can be inspected with @ref telnet_option_local and
+ * @ref telnet_option_peer.
+ *
+ * minitelnet implements the RFC 1143 Q-method for negotiation state. The
+ * possible states are described by @ref telnet_option_state. Applications
+ * normally care primarily about the stable @ref TELNET_OPTION_NO and
+ * @ref TELNET_OPTION_YES states, plus @ref TELNET_OPTION_REQUEST_PENDING.
+ *
+ * To request a state change, use @ref telnet_send_negotiation. For example,
+ * requesting that the peer perform an option uses DO, while offering to
+ * perform an option locally uses WILL. The Q-method handles outstanding and
+ * crossed negotiations without requiring the application to reproduce the
+ * RFC 1143 state machine.
+ *
+ * @subsection negotiation_policy Negotiation policy
+ *
+ * minitelnet does not decide whether an unsolicited option request should be
+ * accepted. Instead, an incoming enable request transitions the corresponding
+ * option to @ref TELNET_OPTION_REQUEST_PENDING and emits @ref TELNET_EV_NEG.
+ *
+ * The application then accepts or rejects the request with
+ * @ref telnet_respond_negotiation:
+ *
+ * - an incoming DO is accepted with WILL and rejected with WONT;
+ * - an incoming WILL is accepted with DO and rejected with DONT.
+ *
+ * The response does not have to be made from inside the event callback. This
+ * allows option policy to be decided asynchronously. A request may also be
+ * withdrawn by the peer before the application responds.
+ *
+ * @ref telnet_respond_negotiation is deliberately separate from
+ * @ref telnet_send_negotiation. A response only applies to a matching pending
+ * request and never starts a new negotiation. This makes a delayed or stale
+ * application response safe if the peer has already withdrawn its request.
+ *
+ * Applications that support no Telnet options can simply reject every
+ * transition to @ref TELNET_OPTION_REQUEST_PENDING.
+ *
+ * @section subnegotiation Subnegotiation
+ *
+ * Option-specific protocols commonly exchange data inside Telnet SB/SE
+ * subnegotiations. minitelnet handles the SB/SE framing and IAC escaping, but
+ * deliberately does not interpret the payload.
+ *
+ * Incoming payload is reported through @ref TELNET_EV_SUBNEG. Subnegotiation
+ * is streamed: a single SB/SE sequence may produce any number of events.
+ * Consequently, the library does not need an internal buffer large enough for
+ * the complete payload.
+ *
+ * @ref telnet_event_subneg identifies the option and contains the payload
+ * chunk and its offset within the current subnegotiation. Applications that
+ * require a complete message can assemble the chunks themselves; applications
+ * with streaming option protocols can process them immediately.
+ *
+ * Outgoing subnegotiation works in the same manner. Calls to
+ * @ref telnet_send_subnegotiation for the same option append payload to the
+ * currently open subnegotiation. Use @ref telnet_send_subnegotiation_end to
+ * terminate it explicitly.
+ *
+ * Starting a subnegotiation for another option closes the previous one.
+ * Sending ordinary application data with @ref telnet_send_data also returns
+ * the sender to normal data mode.
+ *
+ * Explicit termination is particularly important when two consecutive
+ * subnegotiations for the same option must remain separate; otherwise another
+ * call for the same option continues the currently open subnegotiation.
+ *
+ * @section option_semantics Option semantics
+ *
+ * The core library intentionally stops at generic Telnet mechanics. It does
+ * not know what options such as BINARY, TTYPE, NAWS, LINEMODE, or NEW-ENVIRON
+ * mean.
+ *
+ * The optional @c minitelnet-def.h header provides constants for common Telnet
+ * options and option-specific command values. Including that header does not
+ * enable or implement those options.
+ *
+ * A typical option implementation therefore consists of application code
+ * which:
+ *
+ * 1. negotiates the option using @ref telnet_send_negotiation or responds to a
+ *    pending request using @ref telnet_respond_negotiation;
+ * 2. observes @ref TELNET_EV_NEG to determine when the option becomes enabled
+ *    or disabled;
+ * 3. interprets incoming @ref TELNET_EV_SUBNEG payloads for that option;
+ * 4. generates option-specific payloads with @ref telnet_send_subnegotiation.
+ *
+ * This separation keeps minitelnet usable with both standard and private
+ * Telnet options without placing option policy in the protocol engine.
+ *
+ * @section errors Errors and recovery
+ *
+ * Malformed or unexpected protocol sequences are reported as
+ * @ref TELNET_EV_ERROR. Error codes are described by @ref telnet_error.
+ * Errors are reported through the same synchronous event mechanism as other
+ * parser events. The state machine recovers from protocol errors and remains
+ * in a valid state, so whether a connection should be closed after an error is
+ * an application decision.
+ *
+ * @section lifetime Lifetime and allocation
+ *
+ * minitelnet performs no dynamic allocation for its protocol state. The
+ * application owns the @ref telnet object and must keep it alive while it is
+ * in use.
+ *
+ * Use @ref telnet_reset to return an existing instance to its initial protocol
+ * state while preserving its configured event handler and user data.
+ * Alternatively, @ref telnet_init may be called on an existing instance to
+ * fully reinitialize it with a new event handler and user data. This is useful
+ * when reusing storage for a new connection.
+ *
+ * As the state machine does not dynamically allocate any memory, no explicit
+ * deallocation is required.
+ *
+ * @section reentrancy Event callbacks and reentrancy
+ *
+ * Events are delivered synchronously. It is therefore valid for an event
+ * handler to call minitelnet functions while handling an event; a common
+ * example is responding to @ref TELNET_OPTION_REQUEST_PENDING with
+ * @ref telnet_respond_negotiation.
+ *
+ * Such calls may themselves cause further events, including
+ * @ref TELNET_EV_SEND or @ref TELNET_EV_NEG, before the original callback
+ * returns. Event handlers should therefore tolerate nested callbacks.
+ *
+ * @section integration Integration model
+ *
+ * minitelnet is intended to sit between an ordered byte transport and an
+ * application protocol:
+ *
+ * @code{.unparsed}
+ * +-----------------------------+
+ * | application                 |
+ * | option policy and semantics |
+ * +-----------------------------+
+ *               |
+ * +-----------------------------+
+ * | minitelnet                  |
+ * | Telnet framing and state    |
+ * +-----------------------------+
+ *               |
+ * +-----------------------------+
+ * | transport                   |
+ * | TCP / TLS / UART / ...      |
+ * +-----------------------------+
+ * @endcode
+ *
+ * TLS, socket management, reconnect logic, terminal emulation, PTYs, and
+ * character encoding are intentionally outside the library.
+ *
+ * See the examples shipped with the project for small complete programs
+ * demonstrating the event loop, option negotiation, and subnegotiation.
+ *
+ * @subsection zephyr Zephyr
+ *
+ * minitelnet can be used directly as a Zephyr module. The repository contains
+ * the module metadata and build integration required for importing it through
+ * a west manifest. To enable minitelnet in a Zephyr application, enable the
+ * following option:
+ *
+ * @code{.kconfig}
+ * CONFIG_MINITELNET=y
+ * @endcode
+ *
+ * The library itself remains independent of Zephyr APIs; using it as a Zephyr
+ * module only integrates minitelnet into the Zephyr build system. Applications
+ * use the same public API described throughout this documentation.
+ */

@@ -42,7 +42,7 @@ void handler(struct telnet *telnet, enum telnet_event_type type, const union tel
 			        option_state_str(event->neg.old_state),
 			        option_state_str(event->neg.new_state));
 			if (event->neg.new_state == TELNET_OPTION_REQUEST_PENDING) {
-				telnet_respond_negotiate(telnet, event->neg.local ? TELNET_CMD_WONT : TELNET_CMD_DONT, event->neg.option);
+				telnet_respond_negotiation(telnet, event->neg.local ? TELNET_CMD_WONT : TELNET_CMD_DONT, event->neg.option);
 			}
 			break;
 		case TELNET_EV_SUBNEG:

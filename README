@@ -20,6 +20,25 @@ Test
 
     ctest --test-dir build --output-on-failure
 
+Zephyr
+
+minitelnet can be imported as a Zephyr module using west.
+
+Add the repository to your west manifest:
+
+    manifest:
+      projects:
+        - name: minitelnet
+          url: https://...
+          revision: main
+
+The module is then available to Zephyr applications through its CMake
+integration. Enable the library with CONFIG_MINITELNET=y 
+and include <minitelnet.h> as usual.
+
+See the Zephyr documentation for adding external modules through west
+manifests.
+
 License
 
 zlib. See LICENSE.

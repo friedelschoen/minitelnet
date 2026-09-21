@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(minitelnet LANGUAGES C)
 
+find_package(Doxygen QUIET)
 include(CTest)
 
 option(MINITELNET_WERROR "Treat minitelnet warnings as errors" ON)
@@ -45,4 +46,10 @@ endif()
 
 if(MINITELNET_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(Doxygen_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "Doxygen not found; documentation will not be built")
 endif()
