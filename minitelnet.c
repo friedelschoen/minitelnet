@@ -12,7 +12,6 @@ enum telnet_state {
 	TELNET_STATE_SUBNEG_OPTION /* expecting subnegotiation option */
 };
 
-
 void telnet_init(struct telnet *telnet, telnet_handler_t handler, void *userdata) {
 	memset(telnet, 0, sizeof(*telnet));
 
@@ -440,7 +439,6 @@ void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command,
 	}
 }
 
-
 static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data, size_t size) {
 	size_t start = 0, i;
 
@@ -549,7 +547,6 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			break;
 	}
 }
-
 
 static void telnet_handle_negotiation(struct telnet *telnet, unsigned char option) {
 	telnet_handle_rfc1143(telnet, telnet->_command, option);

@@ -43,7 +43,6 @@ enum telnet_command {
 	TELNET_CMD_ESC = 0xff   /**< Escaped IAC byte. */
 };
 
-
 /** Errors detected while parsing the Telnet stream. */
 enum telnet_error {
 	/** SB was encountered while a subnegotiation was already active. */
