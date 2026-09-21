@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Zlib */
+/* Copyright (c) 2026 Friedel Schön */
+
 #include <assert.h>
 #include <minitelnet.h>
 #include <string.h>

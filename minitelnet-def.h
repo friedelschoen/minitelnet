@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Zlib */
+/* Copyright (c) 2026 Friedel Schön */
+
 #pragma once
 
 enum telnet_option_code {
