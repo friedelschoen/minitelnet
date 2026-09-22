@@ -510,20 +510,6 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 
-		case TELNET_CMD_NOP:
-		case TELNET_CMD_DM:
-		case TELNET_CMD_BRK:
-		case TELNET_CMD_IP:
-		case TELNET_CMD_AO:
-		case TELNET_CMD_AYT:
-		case TELNET_CMD_EC:
-		case TELNET_CMD_EL:
-		case TELNET_CMD_GA:
-			ev.command = cmd;
-			telnet_emit(telnet, TELNET_EV_COMMAND, &ev);
-			telnet->_state = TELNET_STATE_DATA;
-			break;
-
 		case TELNET_CMD_SB:
 			if (telnet->_recv_sub_option != -1) {
 				ev.error = TELNET_ERR_INVALID_SB;
@@ -541,8 +527,14 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			telnet->_state = TELNET_STATE_OPTION;
 			break;
 
-		case TELNET_IAC:
+		case TELNET_CMD_ESC:
 			telnet_write_raw(telnet, (unsigned char *) &cmd, 1);
+			telnet->_state = TELNET_STATE_DATA;
+			break;
+
+		default:
+			ev.command = cmd;
+			telnet_emit(telnet, TELNET_EV_COMMAND, &ev);
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
