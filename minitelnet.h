@@ -102,6 +102,13 @@ enum telnet_event_type {
 	 *
 	 * The command is available as event->command. This event is used for
 	 * commands such as NOP, DM, BRK, IP, AO, AYT, EC, EL and GA.
+	 *
+	 * Unknown command codes are also reported through this event, allowing
+	 * applications to implement private commands. Unknown commands are treated
+	 * as single-byte commands without arguments. For example, the following
+	 * sequence emits one command event with the command code 0xA0:
+	 *
+	 *     IAC A0
 	 */
 	TELNET_EV_COMMAND,
 
