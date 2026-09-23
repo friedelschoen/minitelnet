@@ -26,201 +26,218 @@ struct test_case {
 };
 
 static struct test_case cases[] = {
-	{
-	    .name = "plain data",
-	    .input = (const unsigned char *) "hello world",
-	    .input_size = 11,
+    {
+        .name = "plain data",
+        .input = (const unsigned char *) "hello world",
+        .input_size = 11,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char *) "hello world",
-	                  11,
-	                  0,
-	              } },
-	        },
-	    },
-	    .event_count = 1,
-	},
-	{
-	    .name = "escape character",
-	    .input = (const unsigned char[]){
-	        'h',
-	        'e',
-	        'l',
-	        'l',
-	        'o',
-	        0xff,
-	        0xff,
-	        'w',
-	        'o',
-	        'r',
-	        'l',
-	        'd',
-	    },
-	    .input_size = 12,
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     0,
+                     (const unsigned char *) "hello world",
+                     11,
+                 }},
+            },
+        },
+        .event_count = 1,
+    },
+    {
+        .name = "escape character",
+        .input = (const unsigned char[]){
+            'h',
+            'e',
+            'l',
+            'l',
+            'o',
+            0xff,
+            0xff,
+            'w',
+            'o',
+            'r',
+            'l',
+            'd',
+        },
+        .input_size = 12,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char *) "hello",
-	                  5,
-	                  0,
-	              } },
-	        },
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char[]){ 0xff },
-	                  1,
-	                  5,
-	              } },
-	        },
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char *) "world",
-	                  5,
-	                  6,
-	              } },
-	        },
-	    },
-	    .event_count = 3,
-	},
-	{
-	    .name = "command",
-	    .input = (const unsigned char[]){
-	        'a',
-	        TELNET_IAC,
-	        TELNET_CMD_NOP,
-	        'b',
-	    },
-	    .input_size = 4,
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     0,
+                     (const unsigned char *) "hello",
+                     5,
+                 }},
+            },
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     0,
+                     (const unsigned char[]){0xff},
+                     1,
+                 }},
+            },
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     5,
+                     (const unsigned char *) "world",
+                     5,
+                 }},
+            },
+        },
+        .event_count = 3,
+    },
+    {
+        .name = "command",
+        .input = (const unsigned char[]){
+            'a',
+            TELNET_IAC,
+            TELNET_CMD_NOP,
+            'b',
+        },
+        .input_size = 4,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char *) "a",
-	                  1,
-	                  0,
-	              } },
-	        },
-	        {
-	            TELNET_EV_COMMAND,
-	            { .command = TELNET_CMD_NOP },
-	        },
-	        {
-	            TELNET_EV_DATA,
-	            { .data = {
-	                  (const unsigned char *) "b",
-	                  1,
-	                  1,
-	              } },
-	        },
-	    },
-	    .event_count = 3,
-	},
-	{
-	    .name = "subnegotiation",
-	    .input = (const unsigned char[]){
-	        TELNET_IAC,
-	        TELNET_CMD_SB,
-	        TELNET_OPT_TTYPE,
-	        TELNET_TTYPE_SEND,
-	        TELNET_IAC,
-	        TELNET_CMD_SE,
-	    },
-	    .input_size = 6,
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     6,
+                     (const unsigned char *) "a",
+                     1,
+                 }},
+            },
+            {
+                TELNET_EV_COMMAND,
+                {.command = {0, TELNET_CMD_NOP}},
+            },
+            {
+                TELNET_EV_DATA,
+                {.data = {
+                     0,
+                     (const unsigned char *) "b",
+                     1,
+                 }},
+            },
+        },
+        .event_count = 3,
+    },
+    {
+        .name = "subnegotiation",
+        .input = (const unsigned char[]){
+            TELNET_IAC,
+            TELNET_CMD_SB,
+            TELNET_OPT_TTYPE,
+            TELNET_OPT_TTYPE_SEND,
+            TELNET_IAC,
+            TELNET_CMD_SE,
+        },
+        .input_size = 6,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_SUBNEG,
-	            { .subneg = {
-	                  (const unsigned char[]){
-	                      TELNET_TTYPE_SEND,
-	                  },
-	                  1,
-	                  0,
-	                  TELNET_OPT_TTYPE,
-	              } },
-	        },
-	    },
-	    .event_count = 1,
-	},
-	{
-	    .name = "escaped IAC in subnegotiation",
-	    .input = (const unsigned char[]){
-	        TELNET_IAC,
-	        TELNET_CMD_SB,
-	        42,
-	        'a',
-	        TELNET_IAC,
-	        TELNET_IAC,
-	        'b',
-	        TELNET_IAC,
-	        TELNET_CMD_SE,
-	    },
-	    .input_size = 9,
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     {TELNET_EV_SUBNEG, (const unsigned char[]){TELNET_OPT_TTYPE_SEND}, 1},
+                     TELNET_OPT_TTYPE,
+                 }},
+            },
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     {TELNET_EV_SUBNEG, NULL, 0},
+                     TELNET_OPT_TTYPE,
+                 }},
+            },
+        },
+        .event_count = 2,
+    },
+    {
+        .name = "escaped IAC in subnegotiation",
+        .input = (const unsigned char[]){
+            TELNET_IAC,
+            TELNET_CMD_SB,
+            42,
+            'a',
+            TELNET_IAC,
+            TELNET_IAC,
+            'b',
+            TELNET_IAC,
+            TELNET_CMD_SE,
+        },
+        .input_size = 9,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_SUBNEG,
-	            { .subneg = {
-	                  (const unsigned char *) "a",
-	                  1,
-	                  0,
-	                  42,
-	              } },
-	        },
-	        {
-	            TELNET_EV_SUBNEG,
-	            { .subneg = {
-	                  (const unsigned char[]){ TELNET_IAC },
-	                  1,
-	                  1,
-	                  42,
-	              } },
-	        },
-	        {
-	            TELNET_EV_SUBNEG,
-	            { .subneg = {
-	                  (const unsigned char *) "b",
-	                  1,
-	                  2,
-	                  42,
-	              } },
-	        },
-	    },
-	    .event_count = 3,
-	},
-	{
-	    .name = "loose SE",
-	    .input = (const unsigned char[]){
-	        TELNET_IAC,
-	        TELNET_CMD_SE,
-	    },
-	    .input_size = 2,
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     0,
+                     (const unsigned char *) "a",
+                     1,
+                     42,
+                 }},
+            },
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     0,
+                     (const unsigned char[]){TELNET_IAC},
+                     1,
+                     42,
+                 }},
+            },
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     1,
+                     (const unsigned char *) "b",
+                     1,
+                     42,
+                 }},
+            },
+            {
+                TELNET_EV_SUBNEG,
+                {.subneg = {
+                     {TELNET_EV_SUBNEG, NULL, 0},
+                     42,
+                 }},
+            },
+        },
+        .event_count = 4,
+    },
+    {
+        .name = "loose SE",
+        .input = (const unsigned char[]){
+            TELNET_IAC,
+            TELNET_CMD_SE,
+        },
+        .input_size = 2,
 
-	    .events = (const struct event_case[]){
-	        {
-	            TELNET_EV_ERROR,
-	            { .error = TELNET_ERR_INVALID_SE },
-	        },
-	    },
-	    .event_count = 1,
-	},
+        .events = (const struct event_case[]){
+            {
+                TELNET_EV_ERROR,
+                {.error = {
+                     0,
+                     TELNET_ERR_INVALID_SE,
+                 }},
+            },
+        },
+        .event_count = 1,
+    },
 };
 
 static void handler(struct telnet *telnet,
-                    enum telnet_event_type type,
                     const union telnet_event *event,
                     void *userdata) {
 	struct test_case *test = userdata;
 	const struct event_case *expected_case;
 	const union telnet_event *expected;
+	enum telnet_event_type type = event->type;
+
+	(void) telnet;
+
+	/* rest unchanged */
 
 	(void) telnet;
 
@@ -244,13 +261,24 @@ static void handler(struct telnet *telnet,
 	switch (type) {
 		case TELNET_EV_COMMAND:
 			ck_assert_msg(
-			    event->command == expected->command,
+			    event->command.code == expected->command.code,
 			    "%s: event %lu: expected command %d, got %d",
 			    test->name,
 			    (unsigned long) test->event_ptr,
-			    (int) expected->command,
-			    (int) event->command);
+			    (int) expected->command.code,
+			    (int) event->command.code);
 			break;
+
+		case TELNET_EV_SUBNEG:
+			ck_assert_msg(
+			    event->subneg.option == expected->subneg.option,
+			    "%s: event %lu: expected option %u, got %u",
+			    test->name,
+			    (unsigned long) test->event_ptr,
+			    (unsigned int) expected->subneg.option,
+			    (unsigned int) event->subneg.option);
+
+			/* fallthrough */
 
 		case TELNET_EV_SEND:
 		case TELNET_EV_DATA:
@@ -262,59 +290,24 @@ static void handler(struct telnet *telnet,
 			    (unsigned long) expected->data.size,
 			    (unsigned long) event->data.size);
 
-			ck_assert_msg(
-			    event->data.offset == expected->data.offset,
-			    "%s: event %lu: expected offset %lu, got %lu",
-			    test->name,
-			    (unsigned long) test->event_ptr,
-			    (unsigned long) expected->data.offset,
-			    (unsigned long) event->data.offset);
-
-			ck_assert_mem_eq(
-			    event->data.buffer,
-			    expected->data.buffer,
-			    event->data.size);
-			break;
-
-		case TELNET_EV_SUBNEG:
-			ck_assert_msg(
-			    event->subneg.size == expected->subneg.size,
-			    "%s: event %lu: expected size %lu, got %lu",
-			    test->name,
-			    (unsigned long) test->event_ptr,
-			    (unsigned long) expected->subneg.size,
-			    (unsigned long) event->subneg.size);
-
-			ck_assert_msg(
-			    event->subneg.offset == expected->subneg.offset,
-			    "%s: event %lu: expected offset %lu, got %lu",
-			    test->name,
-			    (unsigned long) test->event_ptr,
-			    (unsigned long) expected->subneg.offset,
-			    (unsigned long) event->subneg.offset);
-
-			ck_assert_msg(
-			    event->subneg.option == expected->subneg.option,
-			    "%s: event %lu: expected option %u, got %u",
-			    test->name,
-			    (unsigned long) test->event_ptr,
-			    (unsigned int) expected->subneg.option,
-			    (unsigned int) event->subneg.option);
-
-			ck_assert_mem_eq(
-			    event->subneg.buffer,
-			    expected->subneg.buffer,
-			    event->subneg.size);
+			if (event->data.size != 0) {
+				ck_assert_mem_eq(
+				    event->data.buffer,
+				    expected->data.buffer,
+				    event->data.size);
+			} else {
+				ck_assert_ptr_null(event->data.buffer);
+			}
 			break;
 
 		case TELNET_EV_ERROR:
 			ck_assert_msg(
-			    event->error == expected->error,
+			    event->error.code == expected->error.code,
 			    "%s: event %lu: expected error %d, got %d",
 			    test->name,
 			    (unsigned long) test->event_ptr,
-			    (int) expected->error,
-			    (int) event->error);
+			    (int) expected->error.code,
+			    (int) event->error.code);
 			break;
 
 		case TELNET_EV_NEG:
@@ -358,44 +351,45 @@ END_TEST
  */
 START_TEST(test_parser_split_input) {
 	const struct event_case events[] = {
-		{
-		    TELNET_EV_DATA,
-		    { .data = {
-		          (const unsigned char *) "a",
-		          1,
-		          0,
-		      } },
-		},
-		{
-		    TELNET_EV_DATA,
-		    { .data = {
-		          (const unsigned char[]){ TELNET_IAC },
-		          1,
-		          1,
-		      } },
-		},
-		{
-		    TELNET_EV_DATA,
-		    { .data = {
-		          (const unsigned char *) "b",
-		          1,
-		          2,
-		      } },
-		},
+	    {
+	        TELNET_EV_DATA,
+	        {.data = {
+	             0,
+	             (const unsigned char *) "a",
+	             1,
+	         }},
+	    },
+	    {
+	        TELNET_EV_DATA,
+	        {.data = {
+	             0,
+	             (const unsigned char[]){TELNET_IAC},
+	             1,
+	         }},
+	    },
+	    {
+	        TELNET_EV_DATA,
+	        {.data = {
+	             0,
+	             (const unsigned char *) "b",
+	             1,
+
+	         }},
+	    },
 	};
 
 	struct test_case test = {
-		.name = "split input",
-		.events = events,
-		.event_count = ARRAY_SIZE(events),
-		.event_ptr = 0,
+	    .name = "split input",
+	    .events = events,
+	    .event_count = ARRAY_SIZE(events),
+	    .event_ptr = 0,
 	};
 
 	static const unsigned char input[] = {
-		'a',
-		TELNET_IAC,
-		TELNET_IAC,
-		'b',
+	    'a',
+	    TELNET_IAC,
+	    TELNET_IAC,
+	    'b',
 	};
 
 	struct telnet telnet;
