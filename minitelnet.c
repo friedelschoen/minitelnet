@@ -29,32 +29,32 @@ void telnet_reset(struct telnet *telnet) {
 	telnet_init(telnet, handler, userdata);
 }
 
-static void telnet_emit(struct telnet *telnet, enum telnet_event_type type, union telnet_event *event) {
+static void telnet_emit(struct telnet *telnet, union telnet_event *event) {
 	assert(telnet->_handler); /* using assert as handler must never be null */
 
-	telnet->_handler(telnet, type, event, telnet->_userdata);
+	telnet->_handler(telnet, event, telnet->_userdata);
 }
 
 static void telnet_send_raw(struct telnet *telnet, const unsigned char *data, size_t size) {
 	union telnet_event ev;
+	ev.type = TELNET_EV_SEND;
 	ev.data.buffer = data;
 	ev.data.size = size;
-	telnet_emit(telnet, TELNET_EV_SEND, &ev);
+	telnet_emit(telnet, &ev);
 }
 
 static void telnet_write_raw(struct telnet *telnet, const unsigned char *data, size_t size) {
 	union telnet_event ev;
 	ev.data.buffer = data;
 	ev.data.size = size;
-	ev.data.offset = telnet->_recv_offset;
-	telnet->_recv_offset += size;
 
 	if (telnet->_recv_sub_option != -1) {
+		ev.type = TELNET_EV_SUBNEG;
 		ev.subneg.option = telnet->_recv_sub_option;
-		/* &ev->data == &ev->subneg */
-		telnet_emit(telnet, TELNET_EV_SUBNEG, &ev);
+		telnet_emit(telnet, &ev);
 	} else {
-		telnet_emit(telnet, TELNET_EV_DATA, &ev);
+		ev.type = TELNET_EV_DATA;
+		telnet_emit(telnet, &ev);
 	}
 }
 
@@ -78,11 +78,12 @@ static void telnet_set_option_local(struct telnet *telnet, unsigned char option,
 	telnet->_options[option] &= 0xf0;
 	telnet->_options[option] |= (unsigned char) state;
 
+	event.type = TELNET_EV_NEG;
 	event.neg.option = option;
 	event.neg.local = 1;
 	event.neg.old_state = old;
 	event.neg.new_state = state;
-	telnet_emit(telnet, TELNET_EV_NEG, &event);
+	telnet_emit(telnet, &event);
 }
 
 static void telnet_set_option_peer(struct telnet *telnet, unsigned char option, enum telnet_option_state state) {
@@ -95,11 +96,12 @@ static void telnet_set_option_peer(struct telnet *telnet, unsigned char option, 
 	telnet->_options[option] &= 0x0f;
 	telnet->_options[option] |= (unsigned char) state << 4;
 
+	event.type = TELNET_EV_NEG;
 	event.neg.option = option;
 	event.neg.local = 0;
 	event.neg.old_state = old;
 	event.neg.new_state = state;
-	telnet_emit(telnet, TELNET_EV_NEG, &event);
+	telnet_emit(telnet, &event);
 }
 
 static void telnet_send_negotiation_raw(struct telnet *telnet, enum telnet_command cmd, unsigned char option) {
@@ -110,8 +112,15 @@ static void telnet_send_negotiation_raw(struct telnet *telnet, enum telnet_comma
 	telnet_send_raw(telnet, out, sizeof(out));
 }
 
-static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd, unsigned char option) {
+static void telnet_error(struct telnet *telnet, enum telnet_error code) {
 	union telnet_event event;
+
+	event.type = TELNET_EV_ERROR;
+	event.error.code = code;
+	telnet_emit(telnet, &event);
+}
+
+static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd, unsigned char option) {
 	enum telnet_option_state local = telnet_option_local(telnet, option),
 	                         peer = telnet_option_peer(telnet, option);
 
@@ -138,8 +147,7 @@ static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd
 				telnet_set_option_peer(telnet, option, TELNET_OPTION_YES);
 				break;
 			case TELNET_OPTION_WANTNO:
-				event.error = TELNET_ERR_NEGOTIATION;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_NEGOTIATION);
 				telnet_set_option_peer(telnet, option, TELNET_OPTION_NO);
 				break;
 			case TELNET_OPTION_WANTYES_OPPOSITE:
@@ -147,8 +155,7 @@ static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd
 				telnet_set_option_peer(telnet, option, TELNET_OPTION_WANTNO);
 				break;
 			case TELNET_OPTION_WANTNO_OPPOSITE:
-				event.error = TELNET_ERR_NEGOTIATION;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_NEGOTIATION);
 				telnet_set_option_peer(telnet, option, TELNET_OPTION_YES);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
@@ -213,8 +220,7 @@ static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd
 				telnet_set_option_local(telnet, option, TELNET_OPTION_YES);
 				break;
 			case TELNET_OPTION_WANTNO:
-				event.error = TELNET_ERR_NEGOTIATION;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_NEGOTIATION);
 				telnet_set_option_local(telnet, option, TELNET_OPTION_NO);
 				break;
 			case TELNET_OPTION_WANTYES_OPPOSITE:
@@ -222,8 +228,7 @@ static void telnet_handle_rfc1143(struct telnet *telnet, enum telnet_command cmd
 				telnet_set_option_local(telnet, option, TELNET_OPTION_WANTNO);
 				break;
 			case TELNET_OPTION_WANTNO_OPPOSITE:
-				event.error = TELNET_ERR_NEGOTIATION;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_NEGOTIATION);
 				telnet_set_option_local(telnet, option, TELNET_OPTION_YES);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
@@ -296,7 +301,6 @@ void telnet_respond_negotiation(struct telnet *telnet, enum telnet_command comma
 }
 
 void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command, unsigned char option) {
-	union telnet_event event;
 	enum telnet_option_state local = telnet_option_local(telnet, option),
 	                         peer = telnet_option_peer(telnet, option);
 
@@ -328,8 +332,7 @@ void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command,
 				break;
 			case TELNET_OPTION_WANTYES:
 			case TELNET_OPTION_WANTNO_OPPOSITE:
-				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_ALREADY_NEGOTIATING);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
 				break;
@@ -362,8 +365,7 @@ void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command,
 				break;
 			case TELNET_OPTION_WANTNO:
 			case TELNET_OPTION_WANTYES_OPPOSITE:
-				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_ALREADY_NEGOTIATING);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
 				break;
@@ -396,8 +398,7 @@ void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command,
 				break;
 			case TELNET_OPTION_WANTYES:
 			case TELNET_OPTION_WANTNO_OPPOSITE:
-				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_ALREADY_NEGOTIATING);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
 				break;
@@ -430,13 +431,29 @@ void telnet_send_negotiation(struct telnet *telnet, enum telnet_command command,
 				break;
 			case TELNET_OPTION_WANTNO:
 			case TELNET_OPTION_WANTYES_OPPOSITE:
-				event.error = TELNET_ERR_ALREADY_NEGOTIATING;
-				telnet_emit(telnet, TELNET_EV_ERROR, &event);
+				telnet_error(telnet, TELNET_ERR_NEGOTIATION);
 				break;
 			case TELNET_OPTION_REQUEST_PENDING:
 				break;
 		}
 	}
+}
+
+static void telnet_send_command_raw(struct telnet *telnet, enum telnet_command command) {
+	unsigned char out[2];
+
+	out[0] = TELNET_IAC;
+	out[1] = command;
+	telnet_send_raw(telnet, out, 2);
+}
+
+void telnet_send_command(struct telnet *telnet, enum telnet_command command) {
+	if (telnet->_send_sub_option != -1) {
+		telnet->_send_sub_option = -1;
+		telnet_send_command_raw(telnet, TELNET_CMD_SE);
+	}
+
+	telnet_send_command_raw(telnet, command);
 }
 
 static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data, size_t size) {
@@ -449,7 +466,7 @@ static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data
 		if (i > start)
 			telnet_send_raw(telnet, data + start, i - start);
 
-		telnet_send_command(telnet, TELNET_CMD_ESC);
+		telnet_send_command_raw(telnet, TELNET_CMD_ESC);
 		start = i + 1;
 	}
 
@@ -460,7 +477,7 @@ static void telnet_send_escaped(struct telnet *telnet, const unsigned char *data
 void telnet_send_data(struct telnet *telnet, const unsigned char *data, size_t size) {
 	if (telnet->_send_sub_option != -1) {
 		telnet->_send_sub_option = -1;
-		telnet_send_command(telnet, TELNET_CMD_SE);
+		telnet_send_command_raw(telnet, TELNET_CMD_SE);
 	}
 
 	telnet_send_escaped(telnet, data, size);
@@ -470,10 +487,10 @@ void telnet_send_subnegotiation(struct telnet *telnet, unsigned char option, con
 	if (telnet->_send_sub_option != option) {
 		if (telnet->_send_sub_option != -1)
 			/* if currently writing to a different subnegotiation, end that */
-			telnet_send_command(telnet, TELNET_CMD_SE);
+			telnet_send_command_raw(telnet, TELNET_CMD_SE);
 
 		telnet->_send_sub_option = option;
-		telnet_send_command(telnet, TELNET_CMD_SB);
+		telnet_send_command_raw(telnet, TELNET_CMD_SB);
 		telnet_send_raw(telnet, &option, 1);
 	}
 
@@ -486,36 +503,34 @@ void telnet_send_subnegotiation_end(struct telnet *telnet, unsigned char option)
 		return;
 
 	telnet->_send_sub_option = -1;
-	telnet_send_command(telnet, TELNET_CMD_SE);
+	telnet_send_command_raw(telnet, TELNET_CMD_SE);
 }
-
-void telnet_send_command(struct telnet *telnet, enum telnet_command command) {
-	unsigned char out[2];
-
-	out[0] = TELNET_IAC;
-	out[1] = command;
-	telnet_send_raw(telnet, out, 2);
-}
-
 static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd) {
 	union telnet_event ev;
+	unsigned char out[1];
 	switch (cmd) {
 		case TELNET_CMD_SE:
 			if (telnet->_recv_sub_option == -1) {
-				ev.error = TELNET_ERR_INVALID_SE;
-				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
+				telnet_error(telnet, TELNET_ERR_INVALID_SE);
+			} else {
+				ev.type = TELNET_EV_SUBNEG;
+				ev.data.buffer = NULL;
+				ev.data.size = 0;
+				ev.subneg.option = telnet->_recv_sub_option;
+				telnet_emit(telnet, &ev);
 			}
+
 			telnet->_recv_sub_option = -1;
-			telnet->_recv_offset = 0;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 
 		case TELNET_CMD_SB:
 			if (telnet->_recv_sub_option != -1) {
-				ev.error = TELNET_ERR_INVALID_SB;
-				telnet_emit(telnet, TELNET_EV_ERROR, &ev);
+				telnet_error(telnet, TELNET_ERR_INVALID_SB);
+				telnet->_state = TELNET_STATE_DATA;
+				break;
 			}
-			telnet->_recv_offset = 0;
+
 			telnet->_state = TELNET_STATE_SUBNEG_OPTION;
 			break;
 
@@ -528,13 +543,15 @@ static void telnet_handle_command(struct telnet *telnet, enum telnet_command cmd
 			break;
 
 		case TELNET_CMD_ESC:
-			telnet_write_raw(telnet, (unsigned char *) &cmd, 1);
+			out[0] = cmd;
+			telnet_write_raw(telnet, out, 1);
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 
 		default:
-			ev.command = cmd;
-			telnet_emit(telnet, TELNET_EV_COMMAND, &ev);
+			ev.type = TELNET_EV_COMMAND;
+			ev.command.code = cmd;
+			telnet_emit(telnet, &ev);
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
@@ -561,7 +578,6 @@ static void telnet_feed_char(struct telnet *telnet, unsigned char chr) {
 
 		case TELNET_STATE_SUBNEG_OPTION:
 			telnet->_recv_sub_option = chr;
-			telnet->_recv_offset = 0;
 			telnet->_state = TELNET_STATE_DATA;
 			break;
 	}
