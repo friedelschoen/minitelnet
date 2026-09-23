@@ -9,8 +9,7 @@
  *
  * - IAC parsing and escaping;
  * - Telnet commands;
- * - WILL/WONT/DO/DONT option negotiation;
- * - RFC 1143 Q-method negotiation state;
+ * - optional RFC 1143 Q-method negotiation state;
  * - streaming subnegotiation;
  * - transport-independent input and output.
  *
@@ -44,6 +43,10 @@
  * Events and their payloads are described by @ref telnet_event_type and
  * @ref telnet_event.
  *
+ * Option negotiation is handled by an optional, independent RFC 1143 state
+ * machine in <minitelnet-negotiation.h>. The core parser only reports
+ * WILL/WONT/DO/DONT commands and performs their wire encoding.
+ *
  * @section receiving Receiving data
  *
  * Pass data received from the peer directly to @ref telnet_feed. Input does
@@ -58,7 +61,7 @@
  *
  * Event buffers are borrowed and valid only for the duration of the callback.
  * Copy data that must be retained after the handler returns. No data is buffered
- * internally and the application must implementent buffering by itself if I/O-
+ * internally and the application must implement buffering by itself if I/O-
  * operations are expensive.
  *
  * @section sending Sending data
@@ -79,53 +82,101 @@
  * minitelnet only performs Telnet protocol framing. Application-level rules
  * associated with negotiated options remain the responsibility of the caller.
  *
- * @section negotiation Option negotiation
+ * @section negotiation RFC 1143 option negotiation
  *
- * Telnet options are directional. An option may independently be enabled for
- * the local endpoint and for the peer:
+ * Telnet options are negotiated independently in both directions:
  *
- * - a local option is performed by this endpoint and is negotiated using
- *   WILL/WONT locally and DO/DONT from the peer;
- * - a peer option is performed by the remote endpoint and is negotiated using
- *   DO/DONT locally and WILL/WONT from the peer.
+ * @code{.unparsed}
+ *                    local option       peer option
  *
- * The current states can be inspected with @ref telnet_option_local and
- * @ref telnet_option_peer.
+ * request enable     WILL               DO
+ * request disable    WONT               DONT
+ * peer enables       DO                 WILL
+ * peer disables      DONT               WONT
+ * @endcode
  *
- * minitelnet implements the RFC 1143 Q-method for negotiation state. The
- * possible states are described by @ref telnet_option_state. Applications
- * normally care primarily about the stable @ref TELNET_OPTION_NO and
- * @ref TELNET_OPTION_YES states, plus @ref TELNET_OPTION_REQUEST_PENDING.
+ * Repeated, simultaneous and crossed negotiations make it insufficient to
+ * represent an option with a simple enabled/disabled flag. RFC 1143 defines
+ * the Q method to handle these cases without negotiation loops.
  *
- * To request a state change, use @ref telnet_send_negotiation. For example,
- * requesting that the peer perform an option uses DO, while offering to
- * perform an option locally uses WILL. The Q-method handles outstanding and
- * crossed negotiations without requiring the application to reproduce the
- * RFC 1143 state machine.
+ * minitelnet implements this state machine separately from the parser:
  *
- * @subsection negotiation_policy Negotiation policy
+ * @code{.c}
+ * #include <minitelnet-negotiation.h>
  *
- * minitelnet does not decide whether an unsolicited option request should be
- * accepted. Instead, an incoming enable request transitions the corresponding
- * option to @ref TELNET_OPTION_REQUEST_PENDING and emits @ref TELNET_EV_NEG.
+ * telnet_negotiation_t negotiation = { 0 };
+ * @endcode
  *
- * The application then accepts or rejects the request with
- * @ref telnet_respond_negotiation:
+ * Each direction of an option can be in one of the stable states NO or YES,
+ * or in WANTNO/WANTYES while waiting for a reply. The OPPOSITE variants
+ * represent a changed desired state while a negotiation is already pending.
  *
- * - an incoming DO is accepted with WILL and rejected with WONT;
- * - an incoming WILL is accepted with DO and rejected with DONT.
+ * For example:
  *
- * The response does not have to be made from inside the event callback. This
- * allows option policy to be decided asynchronously. A request may also be
- * withdrawn by the peer before the application responds.
+ * @code{.unparsed}
+ * NO
+ *  |
+ *  | request DO
+ *  v
+ * WANTYES
+ *  |
+ *  | request DONT before reply
+ *  v
+ * WANTYES_OPPOSITE
+ *  |
+ *  | receive WILL
+ *  v
+ * WANTNO  -- send DONT -->
+ *  |
+ *  | receive WONT
+ *  v
+ * NO
+ * @endcode
  *
- * @ref telnet_respond_negotiation is deliberately separate from
- * @ref telnet_send_negotiation. A response only applies to a matching pending
- * request and never starts a new negotiation. This makes a delayed or stale
- * application response safe if the peer has already withdrawn its request.
+ * Incoming TELNET_EV_NEG events are passed explicitly to the state machine:
  *
- * Applications that support no Telnet options can simply reject every
- * transition to @ref TELNET_OPTION_REQUEST_PENDING.
+ * @code{.c}
+ * case TELNET_EV_NEG: {
+ *     struct telnet_negotiation_transition trns;
+ *
+ *     if (telnet_negotiation_feed(negotiation,
+ *                                 event->command.code,
+ *                                 event->neg.option,
+ *                                 &trns)) {
+ *         if (trns.outgoing)
+ *             telnet_send_negotiation(telnet,
+ *                                     trns.outgoing,
+ *                                     trns.option);
+ *
+ *         /* Handle the resulting state here. */
+ *     }
+ *     break;
+ * }
+ * @endcode
+ *
+ * telnet_negotiation_request() expresses a desired option state. It does not
+ * necessarily produce a command: requesting a state which is already active
+ * or already pending is a no-op. If a command must be transmitted, it is
+ * returned in trns.outgoing and encoded using telnet_send_negotiation().
+ *
+ * @subsection negotiation_requests Negotiation Requests
+ *
+ * minitelnet adds TELNET_OPTION_REQUEST_PENDING for unsolicited enable
+ * requests. This allows option policy to remain in the application.
+ *
+ * Receiving DO while the local option is NO, or WILL while the peer option
+ * is NO, enters REQUEST_PENDING. The application then accepts or rejects
+ * the request with telnet_negotiation_respond():
+ *
+ * @code{.unparsed}
+ * received DO:    WILL = accept, WONT = reject
+ * received WILL:  DO   = accept, DONT = reject
+ * @endcode
+ *
+ * A response may be made immediately or later. If the peer withdraws the
+ * request first, a later response is ignored and does not start a new
+ * negotiation.
+ *
  *
  * @section subnegotiation Subnegotiation
  *
@@ -136,12 +187,14 @@
  * Incoming payload is reported through @ref TELNET_EV_SUBNEG. Subnegotiation
  * is streamed: a single SB/SE sequence may produce any number of events.
  * Consequently, the library does not need an internal buffer large enough for
- * the complete payload.
+ * the complete payload. Its successful end is reported by a final
+ * @ref TELNET_EV_SUBNEG with @c event->data.buffer == NULL and
+ * @c event->data.size == 0.
  *
- * @ref telnet_event_subneg identifies the option and contains the payload
- * chunk and its offset within the current subnegotiation. Applications that
- * require a complete message can assemble the chunks themselves; applications
- * with streaming option protocols can process them immediately.
+ * @ref telnet_event_subneg identifies the option. The payload chunk is
+ * available through event->data. Applications that require a complete message 
+ * can assemble the chunks themselves; applications with streaming option 
+ * protocols can process them immediately.
  *
  * Outgoing subnegotiation works in the same manner. Calls to
  * @ref telnet_send_subnegotiation for the same option append payload to the
@@ -158,23 +211,13 @@
  *
  * @section option_semantics Option semantics
  *
- * The core library intentionally stops at generic Telnet mechanics. It does
- * not know what options such as BINARY, TTYPE, NAWS, LINEMODE, or NEW-ENVIRON
- * mean.
+ * The parser and negotiation state machine intentionally stop at generic
+ * Telnet mechanics. They do not know what options such as BINARY, TTYPE,
+ * NAWS, LINEMODE, or NEW-ENVIRON mean. 
  *
  * The optional @c minitelnet-def.h header provides constants for common Telnet
  * options and option-specific command values. Including that header does not
  * enable or implement those options.
- *
- * A typical option implementation therefore consists of application code
- * which:
- *
- * 1. negotiates the option using @ref telnet_send_negotiation or responds to a
- *    pending request using @ref telnet_respond_negotiation;
- * 2. observes @ref TELNET_EV_NEG to determine when the option becomes enabled
- *    or disabled;
- * 3. interprets incoming @ref TELNET_EV_SUBNEG payloads for that option;
- * 4. generates option-specific payloads with @ref telnet_send_subnegotiation.
  *
  * This separation keeps minitelnet usable with both standard and private
  * Telnet options without placing option policy in the protocol engine.
@@ -194,7 +237,7 @@
  * application owns the @ref telnet object and must keep it alive while it is
  * in use.
  *
- * Use @ref telnet_reset to return an existing instance to its initial protocol
+ * Use @ref telnet_reset to return an existing instance to its initial parser
  * state while preserving its configured event handler and user data.
  * Alternatively, @ref telnet_init may be called on an existing instance to
  * fully reinitialize it with a new event handler and user data. This is useful
@@ -205,14 +248,9 @@
  *
  * @section reentrancy Event callbacks and reentrancy
  *
- * Events are delivered synchronously. It is therefore valid for an event
- * handler to call minitelnet functions while handling an event; a common
- * example is responding to @ref TELNET_OPTION_REQUEST_PENDING with
- * @ref telnet_respond_negotiation.
- *
  * Such calls may themselves cause further events, including
- * @ref TELNET_EV_SEND or @ref TELNET_EV_NEG, before the original callback
- * returns. Event handlers should therefore tolerate nested callbacks.
+ * @ref TELNET_EV_SEND, before the original callback returns. Event handlers
+ * should therefore tolerate nested callbacks.
  *
  * @section integration Integration model
  *
@@ -226,8 +264,13 @@
  * +-----------------------------+
  *               |
  * +-----------------------------+
+ * | minitelnet-negotiation      |
+ * | RFC 1143 state (optional)   |
+ * +-----------------------------+
+ *               |
+ * +-----------------------------+
  * | minitelnet                  |
- * | Telnet framing and state    |
+ * | Telnet framing              |
  * +-----------------------------+
  *               |
  * +-----------------------------+

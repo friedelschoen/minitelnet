@@ -5,9 +5,11 @@ set(DOXYGEN_GENERATE_HTML YES)
 set(DOXYGEN_GENERATE_MAN NO)
 set(DOXYGEN_EXTRACT_ALL NO)
 set(DOXYGEN_WARN_IF_UNDOCUMENTED YES)
+set(DOXYGEN_QUIET YES)
 
 doxygen_add_docs(minitelnet_docs
     ${PROJECT_SOURCE_DIR}/minitelnet.h
+    ${PROJECT_SOURCE_DIR}/minitelnet-negotiation.h
     ${PROJECT_SOURCE_DIR}/minitelnet-def.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mainpage.dox
     ALL

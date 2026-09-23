@@ -191,7 +191,7 @@ int telnet_negotiation_respond(telnet_negotiation_t neg, enum telnet_command com
 	}
 }
 
-int telnet_negotiation_send(telnet_negotiation_t neg, enum telnet_command command, unsigned char option, struct telnet_negotiation_transition *trns) {
+int telnet_negotiation_request(telnet_negotiation_t neg, enum telnet_command command, unsigned char option, struct telnet_negotiation_transition *trns) {
 	enum telnet_negotiation_state local = telnet_negotiation_local(neg, option),
 	                              peer = telnet_negotiation_peer(neg, option);
 
