@@ -8,9 +8,11 @@ include(CTest)
 option(MINITELNET_WERROR "Treat minitelnet warnings as errors" ON)
 option(MINITELNET_TEST_ON_BUILD "Run tests as part of the default build" ON)
 option(MINITELNET_BUILD_EXAMPLES "Build minitelnet examples" ON)
+#option(MINITELNET_BUILD_OPTIONS "Build options library" ON)
 
 add_library(minitelnet
     minitelnet.c
+    minitelnet-negotiation.c
 )
 
 target_include_directories(minitelnet
@@ -43,6 +45,10 @@ if(BUILD_TESTING)
         )
     endif()
 endif()
+
+#if (MINITELNET_BUILD_OPTIONS)
+#    add_subdirectory(options)
+#endif()
 
 if(MINITELNET_BUILD_EXAMPLES)
     add_subdirectory(examples)
