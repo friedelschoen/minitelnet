@@ -123,8 +123,8 @@ int telnet_negotiation_feed(telnet_negotiation_t neg, enum telnet_command cmd,
  * @return Non-zero if an option state changed and @p trns was populated;
  *         zero if the request caused no state transition.
  */
-int telnet_negotiation_send(telnet_negotiation_t neg, enum telnet_command command,
-                            unsigned char option, struct telnet_negotiation_transition *trns);
+int telnet_negotiation_request(telnet_negotiation_t neg, enum telnet_command command,
+                               unsigned char option, struct telnet_negotiation_transition *trns);
 
 /**
  * Respond to a pending option enable request from the peer.

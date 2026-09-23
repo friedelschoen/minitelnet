@@ -49,7 +49,7 @@ enum telnet_error {
 	TELNET_ERR_INVALID_SB,
 
 	/** SE was encountered while no subnegotiation was active. */
-	TELNET_ERR_INVALID_SE,
+	TELNET_ERR_INVALID_SE
 };
 
 /** @} */

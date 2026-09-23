@@ -387,7 +387,7 @@ START_TEST(test_send_table) {
 		memset(&trns, 0, sizeof(trns));
 		set_state(neg, OPTION, tc->local, tc->initial);
 
-		updated = telnet_negotiation_send(
+		updated = telnet_negotiation_request(
 		    neg, tc->command, OPTION, &trns);
 
 		ck_assert_msg(
@@ -935,7 +935,7 @@ START_TEST(test_directions_are_independent) {
 	memset(&trns, 0, sizeof(trns));
 
 	ck_assert_int_eq(
-	    telnet_negotiation_send(
+	    telnet_negotiation_request(
 	        neg, TELNET_CMD_WILL, OPTION, &trns),
 	    1);
 
