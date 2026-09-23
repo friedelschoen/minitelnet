@@ -51,7 +51,7 @@ enum telnet_error {
 	/** SE was encountered while no subnegotiation was active. */
 	TELNET_ERR_INVALID_SE,
 
-	/** An invalid negotiation sequences was sent by peer. */
+	/** An invalid negotiation sequence was received from the peer. */
 	TELNET_ERR_NEGOTIATION,
 
 	/** telnet_send_negotiation() is called in the middle of an ongoing negotiation */
@@ -62,8 +62,8 @@ enum telnet_error {
  * State of one direction of a Telnet option negotiation.
  *
  * The YES/NO/WANTYES/WANTNO states are defined in RFC 1143 as the Q-method
- * option negotiation. In this RFC the function and meaning for each state is
- * described more detailed.
+ * option negotiation. RFC 1143 defines the meaning and transitions
+ * of these states in detail.
  *
  * TELNET_OPTION_REQUEST_PENDING is a minitelnet extension. RFC 1143 assumes
  * that an unsolicited enable request is accepted or rejected when it is
@@ -100,7 +100,7 @@ enum telnet_event_type {
 	/**
 	 * A Telnet command without library-defined semantics was received.
 	 *
-	 * The command is available as event->command. This event is used for
+	 * The command is available as event->command.code. This event is used for
 	 * commands such as NOP, DM, BRK, IP, AO, AYT, EC, EL and GA.
 	 *
 	 * Unknown command codes are also reported through this event, allowing
@@ -145,13 +145,11 @@ enum telnet_event_type {
 	 * A chunk of subnegotiation payload was received.
 	 *
 	 * event->subneg.option identifies the Telnet option. Payload is
-	 * delivered incrementally; the complete subnegotiation is deliberately
-	 * not buffered by the library.
+	 * delivered incrementally through event->data; the complete
+	 * subnegotiation is deliberately not buffered by the library.
 	 *
-	 * event->subneg.offset gives the byte offset of this chunk within the
-	 * current subnegotiation.
-	 *
-	 * The buffer is only valid for the duration of the callback.
+	 * The end of the subnegotiation is reported by a final event with
+	 * event->data.buffer == NULL and event->data.size == 0.
 	 */
 	TELNET_EV_SUBNEG,
 
@@ -161,10 +159,6 @@ enum telnet_event_type {
 	 * Telnet commands and IAC escaping have already been removed. Payload
 	 * may be delivered in arbitrary-sized chunks.
 	 *
-	 * event->data.offset gives the byte offset in the current input stream
-	 * since the last mode switch. Summarizing, relaying on the offset as
-	 * an absolute offset pointer is not recommended.
-	 *
 	 * The buffer is only valid for the duration of the callback.
 	 */
 	TELNET_EV_DATA,
@@ -172,7 +166,7 @@ enum telnet_event_type {
 	/**
 	 * A malformed Telnet sequence was encountered.
 	 *
-	 * The specific error is available as event->error.
+	 * The specific error is available as event->error.code.
 	 */
 	TELNET_EV_ERROR
 };
@@ -184,9 +178,9 @@ enum telnet_event_type {
  * be retained after the event handler returns.
  */
 struct telnet_event_data {
-	const unsigned char *buffer; /**< First byte of this chunk. */
-	size_t size;                 /**< Number of bytes in this chunk. */
-	size_t offset;               /**< Stream-relative offset of the first byte. */
+	enum telnet_event_type _type; /**< @private */
+	const unsigned char *buffer;  /**< First byte of this chunk. */
+	size_t size;                  /**< Number of bytes in this chunk. */
 };
 
 /**
@@ -196,15 +190,15 @@ struct telnet_event_data {
  * Consequently, receiving arbitrarily large subnegotiations does not
  * require an equally large internal buffer.
  *
- * The initial members intentionally match struct telnet_event_data,
- * allowing a TELNET_EV_SUBNEG event to also be accessed through
- * event->data.
+ * The end of a subnegotiation is indicated by a final TELNET_EV_SUBNEG
+ * event with data.buffer == NULL and data.size == 0.
+ *
+ * The streaming fields should be accessed through event->data;
+ * event->subneg is only needed to access the option code.
  */
 struct telnet_event_subneg {
-	const unsigned char *buffer; /**< Payload bytes in this chunk. */
-	size_t size;                 /**< Number of payload bytes in this chunk. */
-	size_t offset;               /**< Offset within the current subnegotiation. */
-	unsigned char option;        /**< Option to which this subnegotiation belongs. */
+	struct telnet_event_data _data; /**< @private */
+	unsigned char option;           /**< Option to which this subnegotiation belongs. */
 };
 
 /**
@@ -213,6 +207,7 @@ struct telnet_event_subneg {
  * If this event is emitted, the state is already set to the new state.
  */
 struct telnet_event_negotiate {
+	enum telnet_event_type _type;       /**< @private */
 	unsigned char option;               /**< Telnet option number. */
 	int local;                          /**< If option changed on the local or peer side. */
 	enum telnet_option_state old_state; /**< State before change. */
@@ -220,23 +215,56 @@ struct telnet_event_negotiate {
 };
 
 /**
- * Event payload passed to a telnet_handler_t.
+ * A Telnet protocol error.
  *
- * The active member is determined by enum telnet_event_type:
+ * This event reports malformed or unexpected protocol input. The parser
+ * recovers from the error and remains in a valid state; deciding whether
+ * to terminate the connection is left to the application.
+ */
+struct telnet_event_error {
+	enum telnet_event_type _type; /**< @private */
+	enum telnet_error code;       /**< Error that occurred. */
+};
+
+/**
+ * A Telnet command without library-defined semantics.
  *
- * - TELNET_EV_COMMAND: event.command
- * - TELNET_EV_SEND:    event.data
- * - TELNET_EV_NEG:     event.neg
- * - TELNET_EV_SUBNEG:  event.subneg or event.data
- * - TELNET_EV_DATA:    event.data
- * - TELNET_EV_ERROR:   event.error
+ * This event is used for commands such as NOP, DM, BRK, IP, AO, AYT, EC,
+ * EL, and GA. Unknown command codes are also reported through this event,
+ * allowing applications to implement private single-byte commands.
+ */
+struct telnet_event_command {
+	enum telnet_event_type _type; /**< @private */
+	enum telnet_command code;     /**< Telnet command code. */
+};
+
+/**
+ *
+ * Event emitted by the Telnet state machine.
+ *
+ * All event structures have the event type as their first member, allowing
+ * the active event type to be inspected through event->type.
+ *
+ * TELNET_EV_SUBNEG additionally shares its initial layout with
+ * struct telnet_event_data, allowing its streaming payload to be accessed
+ * through event->data.
+ *
+ * The active member is determined by event->type:
+ *
+ * - TELNET_EV_COMMAND: event->command
+ * - TELNET_EV_SEND:    event->data
+ * - TELNET_EV_NEG:     event->neg
+ * - TELNET_EV_SUBNEG:  event->subneg, with streaming data through event->data
+ * - TELNET_EV_DATA:    event->data
+ * - TELNET_EV_ERROR:   event->error
  */
 union telnet_event {
-	enum telnet_error error;
+	enum telnet_event_type type;
+	struct telnet_event_error error;
 	struct telnet_event_data data;
 	struct telnet_event_subneg subneg;
 	struct telnet_event_negotiate neg;
-	enum telnet_command command;
+	struct telnet_event_command command;
 };
 
 /** @} */
@@ -252,7 +280,6 @@ struct telnet;
  * Telnet event callback.
  *
  * @param telnet   Telnet state that emitted the event.
- * @param type     Type of event being delivered.
  * @param event    Event-specific payload. Only valid during this call.
  * @param userdata Opaque pointer supplied to telnet_init().
  *
@@ -270,7 +297,6 @@ struct telnet;
  * to send data back and forth.
  */
 typedef void (*telnet_handler_t)(struct telnet *telnet,
-                                 enum telnet_event_type type,
                                  const union telnet_event *event,
                                  void *userdata);
 
@@ -298,9 +324,6 @@ struct telnet {
 
 	/** @private Active incoming subnegotiation option, or -1 if none is active. */
 	int _recv_sub_option;
-
-	/** @private Current receive offset used for streaming events. */
-	size_t _recv_offset;
 
 	/** @private Active outgoing subnegotiation option, or -1 if none is active. */
 	int _send_sub_option;
@@ -419,8 +442,8 @@ void telnet_send_subnegotiation_end(struct telnet *telnet, unsigned char option)
  *
  * Encoded bytes are emitted through TELNET_EV_SEND.
  */
-void telnet_send_command(struct telnet *telnet,
-                         enum telnet_command command);
+void telnet_send_command_raw(struct telnet *telnet,
+                             enum telnet_command command);
 
 /**
  * Initiate a Telnet option negotiation.
