@@ -15,18 +15,13 @@ struct test_context {
 };
 
 static void handler(struct telnet *telnet,
-                    enum telnet_event_type type,
                     const union telnet_event *event,
                     void *userdata) {
 	struct test_context *ctx = userdata;
 
 	(void) telnet;
 
-	/*
-	 * The send API should only produce TELNET_EV_SEND events in these
-	 * tests. Negotiation is tested separately.
-	 */
-	ck_assert_int_eq(type, TELNET_EV_SEND);
+	ck_assert_int_eq(event->type, TELNET_EV_SEND);
 
 	ck_assert_msg(
 	    ctx->output_size + event->data.size <= sizeof(ctx->output),
@@ -62,11 +57,9 @@ static void assert_output(const struct test_context *ctx,
  */
 START_TEST(test_send_plain_data) {
 	static const unsigned char input[] = {
-		'h', 'e', 'l', 'l', 'o'
-	};
+	    'h', 'e', 'l', 'l', 'o'};
 	static const unsigned char expected[] = {
-		'h', 'e', 'l', 'l', 'o'
-	};
+	    'h', 'e', 'l', 'l', 'o'};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -84,11 +77,9 @@ END_TEST
  */
 START_TEST(test_send_escaped_iac) {
 	static const unsigned char input[] = {
-		'a', TELNET_IAC, 'b'
-	};
+	    'a', TELNET_IAC, 'b'};
 	static const unsigned char expected[] = {
-		'a', TELNET_IAC, TELNET_IAC, 'b'
-	};
+	    'a', TELNET_IAC, TELNET_IAC, 'b'};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -106,17 +97,15 @@ END_TEST
  */
 START_TEST(test_send_multiple_iac) {
 	static const unsigned char input[] = {
-		TELNET_IAC,
-		TELNET_IAC,
-		'a',
-		TELNET_IAC
-	};
+	    TELNET_IAC,
+	    TELNET_IAC,
+	    'a',
+	    TELNET_IAC};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_IAC,
-		TELNET_IAC, TELNET_IAC,
-		'a',
-		TELNET_IAC, TELNET_IAC
-	};
+	    TELNET_IAC, TELNET_IAC,
+	    TELNET_IAC, TELNET_IAC,
+	    'a',
+	    TELNET_IAC, TELNET_IAC};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -134,8 +123,7 @@ END_TEST
  */
 START_TEST(test_send_command) {
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_NOP
-	};
+	    TELNET_IAC, TELNET_CMD_NOP};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -155,13 +143,11 @@ END_TEST
  */
 START_TEST(test_send_subnegotiation) {
 	static const unsigned char payload[] = {
-		'a', 'b', 'c'
-	};
+	    'a', 'b', 'c'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a', 'b', 'c',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a', 'b', 'c',
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -183,15 +169,13 @@ END_TEST
  */
 START_TEST(test_send_subnegotiation_escaped_iac) {
 	static const unsigned char payload[] = {
-		'a', TELNET_IAC, 'b'
-	};
+	    'a', TELNET_IAC, 'b'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a',
-		TELNET_IAC, TELNET_IAC,
-		'b',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a',
+	    TELNET_IAC, TELNET_IAC,
+	    'b',
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -213,17 +197,14 @@ END_TEST
  */
 START_TEST(test_send_subnegotiation_streaming) {
 	static const unsigned char first[] = {
-		'a', 'b'
-	};
+	    'a', 'b'};
 	static const unsigned char second[] = {
-		'c', 'd'
-	};
+	    'c', 'd'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a', 'b',
-		'c', 'd',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a', 'b',
+	    'c', 'd',
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -248,20 +229,17 @@ END_TEST
  */
 START_TEST(test_send_subnegotiation_switch_option) {
 	static const unsigned char first[] = {
-		'a'
-	};
+	    'a'};
 	static const unsigned char second[] = {
-		'b'
-	};
+	    'b'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a',
-		TELNET_IAC, TELNET_CMD_SE,
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a',
+	    TELNET_IAC, TELNET_CMD_SE,
 
-		TELNET_IAC, TELNET_CMD_SB, 43,
-		'b',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 43,
+	    'b',
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -287,17 +265,14 @@ END_TEST
  */
 START_TEST(test_send_data_closes_subnegotiation) {
 	static const unsigned char payload[] = {
-		'a'
-	};
+	    'a'};
 	static const unsigned char data[] = {
-		'b'
-	};
+	    'b'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a',
-		TELNET_IAC, TELNET_CMD_SE,
-		'b'
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a',
+	    TELNET_IAC, TELNET_CMD_SE,
+	    'b'};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -320,13 +295,11 @@ END_TEST
  */
 START_TEST(test_send_subnegotiation_end_wrong_option) {
 	static const unsigned char payload[] = {
-		'a'
-	};
+	    'a'};
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a',
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -368,9 +341,8 @@ END_TEST
  */
 START_TEST(test_send_empty_subnegotiation) {
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    TELNET_IAC, TELNET_CMD_SE};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -410,13 +382,11 @@ END_TEST
  */
 START_TEST(test_send_empty_data_closes_subnegotiation) {
 	static const unsigned char expected[] = {
-		TELNET_IAC, TELNET_CMD_SB, 42,
-		'a',
-		TELNET_IAC, TELNET_CMD_SE
-	};
+	    TELNET_IAC, TELNET_CMD_SB, 42,
+	    'a',
+	    TELNET_IAC, TELNET_CMD_SE};
 	static const unsigned char payload[] = {
-		'a'
-	};
+	    'a'};
 
 	struct telnet telnet;
 	struct test_context ctx;
@@ -429,6 +399,38 @@ START_TEST(test_send_empty_data_closes_subnegotiation) {
 	telnet_send_data(&telnet, NULL, 0);
 
 	assert_output(&ctx, expected, sizeof(expected));
+}
+END_TEST
+
+START_TEST(test_send_negotiation) {
+	static const enum telnet_command commands[] = {
+	    TELNET_CMD_WILL,
+	    TELNET_CMD_WONT,
+	    TELNET_CMD_DO,
+	    TELNET_CMD_DONT,
+	};
+
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(commands); ++i) {
+		struct telnet telnet;
+		struct test_context ctx;
+		unsigned char expected[] = {
+		    TELNET_IAC,
+		    0,
+		    42,
+		};
+
+		init_telnet(&telnet, &ctx);
+
+		expected[1] = (unsigned char) commands[i];
+
+		telnet_send_negotiation(
+		    &telnet, commands[i], 42);
+
+		assert_output(
+		    &ctx, expected, sizeof(expected));
+	}
 }
 END_TEST
 
@@ -450,6 +452,7 @@ static Suite *send_suite(void) {
 
 	command = tcase_create("command");
 	tcase_add_test(command, test_send_command);
+	tcase_add_test(command, test_send_negotiation);
 	suite_add_tcase(suite, command);
 
 	subneg = tcase_create("subnegotiation");
