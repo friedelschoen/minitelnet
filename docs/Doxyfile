@@ -1,0 +1,18 @@
+PROJECT_NAME           = "minitelnet"
+PROJECT_BRIEF          = "Small TELNET protocol implementation for C"
+
+OUTPUT_DIRECTORY       = build/docs
+
+GENERATE_HTML          = YES
+GENERATE_MAN           = NO
+
+EXTRACT_ALL            = NO
+WARN_IF_UNDOCUMENTED   = YES
+QUIET                  = YES
+
+INPUT                   = minitelnet.h \
+                          minitelnet-negotiation.h \
+                          minitelnet-def.h \
+                          docs/mainpage.dox
+
+RECURSIVE               = NO
