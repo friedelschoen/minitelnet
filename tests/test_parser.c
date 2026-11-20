@@ -129,7 +129,7 @@ static struct test_case cases[] = {
             TELNET_IAC,
             TELNET_CMD_SB,
             TELNET_OPT_TTYPE,
-            TELNET_OPT_TTYPE_SEND,
+            TELNET_TTYPE_SEND,
             TELNET_IAC,
             TELNET_CMD_SE,
         },
@@ -139,7 +139,7 @@ static struct test_case cases[] = {
             {
                 TELNET_EV_SUBNEG,
                 {.subneg = {
-                     {TELNET_EV_SUBNEG, (const unsigned char[]){TELNET_OPT_TTYPE_SEND}, 1},
+                     {TELNET_EV_SUBNEG, (const unsigned char[]){TELNET_TTYPE_SEND}, 1},
                      TELNET_OPT_TTYPE,
                  }},
             },
