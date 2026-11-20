@@ -43,7 +43,7 @@ int telnet_negotiation_feed(telnet_negotiation_t neg, enum telnet_command cmd, u
 		switch (state) {
 			case TELNET_OPTION_NO:
 				/* NO -> YES: need permission so make it pending */
-				state = TELNET_OPTION_REQUEST_PENDING;
+				state = TELNET_OPTION_PENDING;
 				break;
 
 			case TELNET_OPTION_WANTYES:
@@ -105,7 +105,7 @@ int telnet_negotiation_respond(telnet_negotiation_t neg, enum telnet_command cmd
 
 	local = cmd == TELNET_CMD_WILL || cmd == TELNET_CMD_WONT;
 	enable = cmd == TELNET_CMD_WILL || cmd == TELNET_CMD_DO;
-	if (telnet_get_state(neg, option, local) != TELNET_OPTION_REQUEST_PENDING)
+	if (telnet_get_state(neg, option, local) != TELNET_OPTION_PENDING)
 		return 0;
 
 	trns->outgoing = cmd;

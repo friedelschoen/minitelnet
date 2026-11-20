@@ -172,8 +172,8 @@ static const struct send_case send_cases[] = {
         "DO: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_DO,
         0,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
     },
@@ -237,8 +237,8 @@ static const struct send_case send_cases[] = {
         "DONT: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_DONT,
         0,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
     },
@@ -302,8 +302,8 @@ static const struct send_case send_cases[] = {
         "WILL: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_WILL,
         1,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
     },
@@ -367,8 +367,8 @@ static const struct send_case send_cases[] = {
         "WONT: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_WONT,
         1,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
     },
@@ -443,7 +443,7 @@ static const struct feed_case feed_cases[] = {
         TELNET_CMD_WILL,
         0,
         TELNET_OPTION_NO,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
         1,
         0,
         0,
@@ -502,8 +502,8 @@ static const struct feed_case feed_cases[] = {
         "WILL: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_WILL,
         0,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
         0,
@@ -574,7 +574,7 @@ static const struct feed_case feed_cases[] = {
         "WONT: REQUEST_PENDING -> NO",
         TELNET_CMD_WONT,
         0,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
         TELNET_OPTION_NO,
         1,
         0,
@@ -587,7 +587,7 @@ static const struct feed_case feed_cases[] = {
         TELNET_CMD_DO,
         1,
         TELNET_OPTION_NO,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
         1,
         0,
         0,
@@ -646,8 +646,8 @@ static const struct feed_case feed_cases[] = {
         "DO: REQUEST_PENDING -> REQUEST_PENDING",
         TELNET_CMD_DO,
         1,
-        TELNET_OPTION_REQUEST_PENDING,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
+        TELNET_OPTION_PENDING,
         0,
         0,
         0,
@@ -718,7 +718,7 @@ static const struct feed_case feed_cases[] = {
         "DONT: REQUEST_PENDING -> NO",
         TELNET_CMD_DONT,
         1,
-        TELNET_OPTION_REQUEST_PENDING,
+        TELNET_OPTION_PENDING,
         TELNET_OPTION_NO,
         1,
         0,
@@ -823,7 +823,7 @@ START_TEST(test_respond) {
 		    neg,
 		    OPTION,
 		    tc->local,
-		    TELNET_OPTION_REQUEST_PENDING);
+		    TELNET_OPTION_PENDING);
 
 		updated = telnet_negotiation_respond(
 		    neg, tc->command, OPTION, &trns);
@@ -901,7 +901,7 @@ START_TEST(test_withdrawn_request_makes_response_stale) {
 	ck_assert_int_eq(updated, 1);
 	ck_assert_int_eq(
 	    telnet_negotiation_peer(neg, OPTION),
-	    TELNET_OPTION_REQUEST_PENDING);
+	    TELNET_OPTION_PENDING);
 
 	memset(&trns, 0, sizeof(trns));
 
@@ -960,7 +960,7 @@ START_TEST(test_directions_are_independent) {
 
 	ck_assert_int_eq(
 	    telnet_negotiation_peer(neg, OPTION),
-	    TELNET_OPTION_REQUEST_PENDING);
+	    TELNET_OPTION_PENDING);
 }
 END_TEST
 

@@ -31,7 +31,7 @@ enum telnet_negotiation_state {
 	TELNET_OPTION_WANTYES_OPPOSITE, /**< Waiting for enable; disable is queued. */
 
 	/* minitelnet extension */
-	TELNET_OPTION_REQUEST_PENDING /**< Peer requested enable; awaiting application decision. */
+	TELNET_OPTION_PENDING /**< Peer requested enable; awaiting application decision. */
 
 	/* Keep below 16: states are stored in 4-bit nibbles. */
 };
