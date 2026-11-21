@@ -55,11 +55,5 @@ if(MINITELNET_BUILD_EXAMPLES)
 endif()
 
 if(MINITELNET_BUILD_DOCS)
-    find_package(Doxygen QUIET)
-
-    if(Doxygen_FOUND)
-        add_subdirectory(docs)
-    else()
-        message(STATUS "Doxygen not found; documentation will not be built")
-    endif()
+    add_subdirectory(docs)
 endif()

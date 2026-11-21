@@ -14,16 +14,35 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ghcr.io/doxygen/doxygen:latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
-      - name: Generate documentation
+      - name: Install Doxygen
         run: |
-          mkdir -p build/docs
-          doxygen docs/Doxyfile
+          sudo apt-get update
+          sudo apt-get install -y doxygen
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r docs/requirements.txt
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build \
+            -DBUILD_TESTING=OFF \
+            -DMINITELNET_BUILD_EXAMPLES=OFF \
+            -DMINITELNET_BUILD_DOCS=ON
+
+      - name: Build documentation
+        run: cmake --build build --target minitelnet_docs
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
@@ -42,3 +61,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+
