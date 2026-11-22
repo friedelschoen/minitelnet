@@ -80,16 +80,26 @@ enum telnet_option_code {
 	TELNET_OPT_EXTENDED_OPTIONS = 255, /**< Extended-Options-List [RFC861] */
 };
 
+/** @} */
+
+/**
+ * @defgroup rfc855-subcmd RFC 855 Subcommando's
+ * @{
+ */
+
+/** Subcommando's for TTYPE option */
 enum telnet_ttype_command {
 	TELNET_TTYPE_IS = 0,
 	TELNET_TTYPE_SEND = 1,
 };
 
+/** Subcommando's for STATUS option */
 enum telnet_status_command {
 	TELNET_STATUS_IS = 0,
 	TELNET_STATUS_SEND = 1,
 };
 
+/** Subcommando's for NEW-ENVIRON option */
 enum telnet_new_environ_command {
 	TELNET_NEW_ENVIRON_IS = 0,
 	TELNET_NEW_ENVIRON_SEND = 1,

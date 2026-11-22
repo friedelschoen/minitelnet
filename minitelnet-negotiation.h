@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 /**
- * @defgroup negotiation RFC 1143 Option Negotiation
+ * @defgroup negotiation Option Negotiation
  * @{
  */
 

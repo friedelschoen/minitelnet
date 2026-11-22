@@ -1,22 +1,9 @@
 API Reference
 *************
 
-Telnet Protocol
-===============
+.. toctree::
+   :maxdepth: 3
 
-.. doxygengroup:: misc_group
-
-.. doxygengroup:: event_group
-
-.. doxygengroup:: telnet_group
-
-Option Negotiation
-==================
-
-.. doxygengroup:: negotiation
-
-Telnet Option Definitions
-=========================
-
-.. doxygengroup:: rfc855
-
+   api-telnet
+   api-negotiation
+   api-def

@@ -202,7 +202,6 @@ struct telnet_event_negotiate {
 };
 
 /**
- *
  * Event emitted by the Telnet state machine.
  *
  * All event structures have the event type as their first member, allowing
@@ -212,22 +211,15 @@ struct telnet_event_negotiate {
  * struct telnet_event_data, allowing its streaming payload to be accessed
  * through event->data.
  *
- * The active member is determined by event->type:
- *
- * - TELNET_EV_COMMAND: event->command
- * - TELNET_EV_SEND:    event->data
- * - TELNET_EV_NEG:     event->neg
- * - TELNET_EV_SUBNEG:  event->subneg, with streaming data through event->data
- * - TELNET_EV_DATA:    event->data
- * - TELNET_EV_ERROR:   event->error
+ * The active member is determined by event->type.
  */
 union telnet_event {
-	enum telnet_event_type type;
-	struct telnet_event_error error;
-	struct telnet_event_data data;
-	struct telnet_event_subneg subneg;
-	struct telnet_event_negotiate neg;
-	struct telnet_event_command command;
+	enum telnet_event_type type;         /**< Type of the emitted event. */
+	struct telnet_event_error error;     /**< Error details for TELNET_EV_ERROR. */
+	struct telnet_event_data data;       /**< Data payload for TELNET_EV_DATA, TELNET_EV_SEND and TELNET_EV_SUBNEG. */
+	struct telnet_event_subneg subneg;   /**< Subnegotiation details for TELNET_EV_SUBNEG. */
+	struct telnet_event_negotiate neg;   /**< Negotiation command and option for TELNET_EV_NEG. */
+	struct telnet_event_command command; /**< Command details for TELNET_EV_COMMAND and TELNET_EV_NEG. */
 };
 
 /** @} */
